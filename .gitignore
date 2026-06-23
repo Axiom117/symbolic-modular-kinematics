@@ -1,0 +1,30 @@
+# MATLAB
+*.m~*
+*.mat
+*.asv
+*.slxc
+*.slx.autosave
+slprj/
+**/slprj/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Rust
+target/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
