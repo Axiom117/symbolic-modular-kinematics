@@ -28,3 +28,7 @@ target/
 # OS
 .DS_Store
 Thumbs.db
+
+# Generated artifacts
+generated/**
+!generated/README.md
