@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <!-- This file demonstrates the use of some <gazebo> tags -->
+
+    <!-- To include it add the following line -->
+    <!-- <xacro:include filename="gazebo_config.xacro" /> -->
+
+
+
+    <!-- Gazebo is unable to use the same <material> tags that are already in the URDF (that RViz uses). -->
+    <!-- Instead, we need to add gazebo tags for our links that refer to Gazebo materials -->
+
+    <gazebo reference="pitchVisual_${moduleID}">
+        <material>Gazebo/Green</material>
+    </gazebo>
+
+    <gazebo reference="yawVisual_${moduleID}">
+        <material>Gazebo/Green</material>
+    </gazebo>
+
+    <gazebo reference="distalPart_${moduleID}">
+        <material>Gazebo/White</material>
+    </gazebo>
+
+    <gazebo reference="proximalPart_${moduleID}">
+        <material>Gazebo/White</material>
+    </gazebo>
+
+    <gazebo reference="jointLVisual_${moduleID}">
+        <material>Gazebo/Blue</material>
+    </gazebo>
+
+    <gazebo reference="jointCVisual_${moduleID}">
+        <material>Gazebo/Red</material>
+    </gazebo>
+
+</robot>

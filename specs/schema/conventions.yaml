@@ -1,0 +1,74 @@
+# 阶段 A.0 建模约定常量（机器可读）
+# 与 ../modeling-conventions.md 一致。修改两者必须同步。
+# 解释器与校验器以本文件为权威常量来源。
+version: 0
+status: frozen
+
+# 层级架构（自底向上四层，见 modeling-conventions.md §2）
+hierarchy:
+  L0: { name: Element, content: [Body, Frame, Port, FixedTransform, Joint, Constraint] }
+  L1: { name: Module, role: parameterized_template, instantiable: true, exposes_only: Port }
+  L2: { name: Mechanism, content: module_instances + connections, graph: [tree, general] }
+  L3: { name: Execution, content: [world_frame, drivers], closes_system: true }
+
+# 建模原语：模块/机构/IR 只能由这些元件组合而成
+element_types:
+  nodes:
+    Body: { dof: 0, geometry_host: true, center_frame: true, fields: [name, geometry?] }
+    Frame: { dof: 0, host: Body, fields: [name, host, exposed?, semantic_tag?] }   # Port = exposed:true; 位姿由 FixedTransform 给出
+  edges:
+    FixedTransform: { dof: 0, fields: [from_frame, to_frame, translation, rotation] }
+    Joint: { dof_min: 1, kinds: [revolute, prismatic], fields: [from_frame, to_frame, kind, axis, variable, limit?] }  # actuated 在执行层指派，非模块字段
+    Constraint: { generated_phase: A4, in_module_def: false, fields: [frame_pair, components] }
+
+coordinate_system:
+  handedness: right
+  world_root: world
+  axes:
+    x: forward
+    y: lateral
+    z: up
+  gravity_dir: [0, 0, -1]
+
+units:
+  length: mm
+  angle_internal: rad
+  angle_input: [deg, rad]      # 输入允许，必须显式标注；内部统一 rad
+  require_boundary_unit_tag: true
+
+rotation:
+  positive_rule: right_hand
+  authoritative: axis_angle    # 轴角 (omega, q) 用于关节与内部 IR
+  display: euler_zyx           # R = Rz(psi)*Ry(theta)*Rx(phi)
+  quaternion_order: [w, x, y, z]
+  compose_order: translate_then_rotate   # p_parent = t + R*p_local
+
+port:
+  is_exposed_frame: true       # Port = exposed:true 的 Frame，非独立元件
+  placement_via: FixedTransform
+  semantic_tag_affects_kinematics: false
+  name_pattern: '^(face[XYZ][+-]|[a-zA-Z][a-zA-Z0-9_]*)$'
+  unique_per_module: true
+  semantic_tags: [connector, joint_side, tool, dock]
+
+connection:
+  types: [coincident, normal_aligned, adaptor]
+  max_use_per_port: 1
+  allow_dangling: false        # 悬空端口须显式标记
+  forbid_axis_conflict: true
+
+parameter_scopes: [module-class, instance, mechanism-config]
+allow_symbolic_expressions: true
+
+# 执行层（L3）：把机构本体接入世界系与驱动源，闭合成可求解系统
+execution:
+  configurations: [closed_loop, open_loop]
+  closed_loop:
+    drivers: external          # 外部驱动器提供多自由度力旋量（wrench）
+    loop: [world, external_driver, mechanism, external_driver, world]
+    closure_criteria: relative_pose_residual   # 回路切口的相对位姿误差分量
+    output: ik_residual
+  open_loop:
+    drivers: actuated_joints    # 关节自身可驱动，无需外部驱动器，如 3R 链
+    root: world
+    output: fk_expression

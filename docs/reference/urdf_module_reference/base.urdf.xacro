@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<robot name="base" xmlns:xacro="http://www.ros.org/wiki/xacro">
+    
+    <xacro:macro name="base">
+        <!-- designate the material tag in Gazebo -->
+        <gazebo reference="basePlate">
+            <material>Gazebo/White</material>
+        </gazebo>
+        
+        <!-- Base plate as the root of M-REx for appending modular branches -->
+        <link name="basePlate">
+<!--             <visual>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                <box size="0.02 0.03 0.0005" />
+            </geometry>
+            <material name="white" />
+            </visual> -->
+            <collision>
+                <geometry>
+                    <box size="1 1 0.001" />
+                </geometry>
+            </collision>
+            <inertial>
+                <mass value="1" />
+                <inertia ixx="1" ixy="0.0" ixz="0.0" iyy="1" iyz="0.0" izz="1" />
+            </inertial>
+        </link>
+        <!-- one of the pivots for interfacing branches of modules -->
+        <link name="connector_A">
+            <visual>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <material name="">
+                <color rgba="1 1 1 1" />
+            </material>
+            </visual>
+        </link>
+        <!-- a 40mm offset on z-axis from the origin of the base plate -->
+        <joint name="offset_A" type="fixed">
+            <origin xyz="0 0 0.01" rpy="${pi/2} 0 0" />
+            <parent link="basePlate" />
+            <child link="connector_A" />
+        </joint>
+
+    </xacro:macro>
+
+</robot>

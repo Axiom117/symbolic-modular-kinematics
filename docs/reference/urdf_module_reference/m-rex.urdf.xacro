@@ -1,0 +1,116 @@
+<?xml version="1.0"?>
+<robot name="m-rex" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <!-- Some Constants-->
+    <!--xacro:property name="pi" value="3.1416" -->
+    <xacro:property name="density" value="1150" />
+    <xacro:property name="jointVisual_length" value="0.0035" />
+    <xacro:property name="jointVisual_radius" value="0.0015" />
+
+    <!-- Property List -->
+    <xacro:property name="link_length" value="0.008"/>
+    <xacro:property name="link_radius" value="0.0015"/>
+    <xacro:property name="link_mass" value="0.0002" />
+    <xacro:property name="box_x" value="0.008" />
+    <xacro:property name="box_y" value="0.003" />
+    <xacro:property name="box_z" value="0.008" />
+
+    <!-- Defining the colors used in this robot -->
+    <material name="yellow">
+        <color rgba="1 0.4 0 1"/>
+    </material>
+    <material name="black">
+        <color rgba="0 0 0 0.95"/>
+    </material>
+    <material name="gray">
+        <color rgba="0.75 0.75 0.75 1"/>
+    </material>
+    <material name="clear">
+        <color rgba="1 1 1 0.35"/>
+    </material>
+    <material name="white">
+        <color rgba="1 1 1 1"/>
+    </material>
+    <material name="blue">
+        <color rgba="0 0 0.8 1"/>
+    </material>
+    <material name="red">
+        <color rgba="0.8 0 0 1"/>
+    </material>
+    <material name="green">
+        <color rgba="0.24 0.76 0.5 1"/>
+    </material>
+
+    <!-- import macros for different modules -->
+    <xacro:include filename="$(find m-rex)/urdf/joint_L.urdf.xacro" />
+    <xacro:include filename="$(find m-rex)/urdf/joint_C.urdf.xacro" />
+    <xacro:include filename="$(find m-rex)/urdf/joint_T.urdf.xacro" />
+    <xacro:include filename="$(find m-rex)/urdf/joint_V.urdf.xacro" />
+    <xacro:include filename="$(find m-rex)/urdf/link.urdf.xacro" />
+    <xacro:include filename="$(find m-rex)/urdf/base.urdf.xacro" />
+    
+    <!-- Macro for connections between modules -->
+    <xacro:macro name="connector" params="moduleA moduleB">
+        <joint name="connect_${moduleA}_to_${moduleB}" type="fixed">
+            <origin xyz="0 0 0" rpy="${-pi} 0 0" />
+            <parent link="connector_${moduleA}" />
+            <child link="connector_${moduleB}" />
+        </joint>
+    </xacro:macro>
+
+    <xacro:base />
+    <xacro:joint_C moduleID="1" angle="0">
+        <empty></empty>
+    </xacro:joint_C>
+    <xacro:connector moduleA="A" moduleB="1A" />
+
+    <xacro:joint_T moduleID="2" angle="${-pi/2}">
+        <empty></empty>
+    </xacro:joint_T>
+    <xacro:connector moduleA="1B" moduleB="2A" />
+
+    <xacro:joint_L moduleID="3" angle="${-pi/2}">
+        <mimic joint="proximalPart_to_distalPart_2" multiplier="1.0" />
+    </xacro:joint_L>
+    <xacro:connector moduleA="2C" moduleB="3A" />
+
+    <xacro:joint_T moduleID="4" angle="${pi/2}">
+        <mimic joint="proximalPart_to_distalPart_2" multiplier="-1.0" />
+    </xacro:joint_T>
+    <xacro:connector moduleA="3B" moduleB="4A" />
+
+    <xacro:joint_L moduleID="5" angle="${-pi/2}">
+        <mimic joint="proximalPart_to_distalPart_2" multiplier="1.0" />
+    </xacro:joint_L>
+    <xacro:connector moduleA="4B" moduleB="5A" />
+
+    <xacro:joint_L moduleID="6" angle="${-pi/2}">
+        <mimic joint="proximalPart_to_distalPart_2" multiplier="-1.0" />
+    </xacro:joint_L>
+    <xacro:connector moduleA="5B" moduleB="6A" />
+
+    <xacro:joint_T moduleID="7" angle="${-pi/2}">
+        <mimic joint="proximalPart_to_distalPart_2" multiplier="1.0" />
+    </xacro:joint_T>
+    <xacro:connector moduleA="6B" moduleB="7A" />
+
+    <xacro:joint_T moduleID="8" angle="${-pi/2}">
+        <mimic joint="proximalPart_to_distalPart_2" multiplier="1.0" />
+    </xacro:joint_T>
+    <xacro:connector moduleA="7C" moduleB="8A" />
+
+    <xacro:joint_C moduleID="9" angle="0">
+        <mimic joint="proximalPart_to_distalPart_1" multiplier="1.0" />
+    </xacro:joint_C>
+    <xacro:connector moduleA="8C" moduleB="9A" />
+
+    <xacro:link moduleID="10" />
+    <xacro:connector moduleA="8B" moduleB="10A" />
+
+    <xacro:link moduleID="11" />
+    <xacro:connector moduleA="10B" moduleB="11A" />
+
+    <xacro:connector moduleA="7B" moduleB="4C" />
+    <xacro:connector moduleA="11B" moduleB="2B" />
+
+</robot>

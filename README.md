@@ -31,7 +31,7 @@ not separate codebases.
 .
 ├── docs/
 │   ├── README.md                # Documentation map and writing rules
-│   ├── development-roadmap.md   # Current roadmap bootstrap document
+│   ├── project-overview.md      # Main project overview and development roadmap
 │   ├── inverse-kinematics-solver-design.md
 │   ├── pathplanner-architecture.md
 │   ├── architecture/            # System boundaries and milestone architecture
