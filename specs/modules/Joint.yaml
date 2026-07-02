@@ -5,9 +5,17 @@
 #
 # 唯一的运动模块：内部封装一个 1-DOF revolute 关节（变量 q）。
 # 端口平移/对齐已知；关节轴方向在参考摘要中标注「待 A.1 从 SLX 精确提取」，
-# 当前以 provisional 占位（+Z），extraction_status 因此为 partial。
+# 当前以 provisional 占位（+X），extraction_status 因此为 partial。
 #
-# 拓扑链：linkA ←fixedTransform— bodyA —[joint: revolute(q)]— bodyB —fixedTransform→ linkB
+# 零位约定（展开态）：物理合页零位是两侧连杆沿铰链轴对称「展开」的构型，而非
+# 传统合页 q=0 两叶重叠（合拢）的构型——二者相差绕铰链轴 180°。本约定下 joint 边
+# 在 q=0 恒为单位阵（§3.4，可视化代码亦证），故「展开」参考不能写进 joint，必须
+# 烘焙进 fixed_transform。此处采用对称拆分：bodyA→hingeA 与 hingeB→bodyB 各承担
+# +90°（绕铰链轴），合成 180°。hingeA 与 hingeB 之间无任何旋转，q=0 时完全重合
+# （关节恒等）；以共同的 hinge 系为基准，两侧 body 对称落在 ∓90°。
+#
+# 拓扑链（零位=展开）：
+#   linkA ←FT— bodyA —FT(+90°)→ hingeA —[joint: revolute(q)]— hingeB —FT(+90°)→ bodyB —FT→ linkB
 
 module_type: Joint
 category: kinematic
@@ -20,32 +28,52 @@ extraction_status: partial
 # --- 内部运动学图 · 刚体（两侧）---
 bodies:
   - name: bodyA
-    geometry: assets/linkage_hinge_joint.STEP
+    geometry: assets/joint_link.stl
   - name: bodyB
-    geometry: assets/linkage_hinge_joint.STEP
+    geometry: assets/joint_link.stl
 
 # --- 端口框架表（两端均 plug，贴到 Frame 的 socket 上）---
 frames:
   - { name: linkA, host: bodyA, exposed: true, semantic_tag: joint_side, polarity: plug }
   - { name: linkB, host: bodyB, exposed: true, semantic_tag: joint_side, polarity: plug }
+  # 内部关节安装框架（不 exposed）：位于铰链轴线上，joint 直接接于二者之间。
+  # q=0 时两者完全重合（关节恒等），彼此不含旋转；展开参考由 body↔hinge 承担。
+  - { name: hingeA, host: bodyA }
+  - { name: hingeB, host: bodyB }
 
-# --- 内部运动学图 · 固定变换（各侧 body 中心 frame → 对应端口）---
+# --- 内部运动学图 · 固定变换 ---
+# 端口侧：各侧 body 中心 frame → 对应端口（相对 body 刚性，随 body 一同摆到展开位）。
 fixed_transforms:
   - from_frame: bodyA
     to_frame: linkA
-    translation: [0, -5, 0]
-    rotation: { align: { a: ["+X", "+Y"], b: ["+Y", "+Z"] } }
+    translation: [0, 5, 0]
+    rotation: { align: { a: ["+Z", "+Y"], b: ["+X", "+Z"] } }
   - from_frame: bodyB
     to_frame: linkB
-    translation: [0, -5, 0]
-    rotation: { align: { a: ["+X", "+Y"], b: ["+Y", "+Z"] } }
-
-# --- 内部运动学图 · 关节（1-DOF revolute）---
-joints:
+    translation: [0, 5, 0]
+    rotation: { align: { a: ["+Z", "+Y"], b: ["+X", "-Z"] } }
+  # 展开参考（对称拆分）：把「合拢零位 → 展开零位」的 180° 拆成两个 +90°，各自绕
+  # 铰链轴 (+X) 施加于一侧 body↔hinge。align 形式 {+Y→+Z, +Z→-Y} 即 Rx(+90°)。
+  # 平移暂取 0（沿用现行 provisional 几何：铰链在 body 中心）；真实铰链线偏移待 SLX 提取。
   - from_frame: bodyA
+    to_frame: hingeA
+    translation: [0, 0, 0]
+    rotation: { align: { a: ["+Y", "+Z"], b: ["+Z", "-Y"] } }
+    provisional: true
+    note: 展开零位参考之半（+90° 绕铰链轴）；与 hingeB 侧对称，合成 180°。铰链线偏移与轴向待 SLX 核实。
+  - from_frame: hingeB
     to_frame: bodyB
+    translation: [0, 0, 0]
+    rotation: { align: { a: ["+Y", "+Z"], b: ["+Z", "-Y"] } }
+    provisional: true
+    note: 展开零位参考之半（+90° 绕铰链轴）；与 hingeA 侧对称，合成 180°。铰链线偏移与轴向待 SLX 核实。
+
+# --- 内部运动学图 · 关节（1-DOF revolute，接于铰链框架之间）---
+joints:
+  - from_frame: hingeA
+    to_frame: hingeB
     kind: revolute
-    axis: [0, 0, 1]
+    axis: [1, 0, 0]
     variable: q
     provisional: true
-    note: 关节轴方向待从 SLX system_21 精确提取；当前以 +Z 占位。
+    note: 关节轴方向待从 SLX system_21 精确提取；当前沿铰链轴 +X 占位。q=0 即展开零位，此时 hingeA≡hingeB。

@@ -3,7 +3,7 @@ function result = visualize_module(moduleYaml, configYaml)
 %   VISUALIZE_MODULE(MODULEYAML) parses a module definition from
 %   specs/modules/*.yaml, builds its internal frame graph (body center
 %   frames + ports), evaluates all fixedTransform / joint edges, and draws:
-%     - each body as a translucent box (simple geometry placeholder)
+%     - each body as imported STEP geometry when available
 %     - each frame/port as an RGB coordinate triad (X=red, Y=green, Z=blue)
 %
 %   VISUALIZE_MODULE(MODULEYAML, CONFIGYAML) also injects numeric parameter
@@ -127,6 +127,9 @@ function result = visualize_module(moduleYaml, configYaml)
         end
     end
 
+    moduleDir = fileparts(moduleYaml);
+    repoRoot = fileparts(fileparts(here));
+
     % --- characteristic scale ---
     maxr = 1;
 
@@ -144,7 +147,6 @@ function result = visualize_module(moduleYaml, configYaml)
     % adjust the maximum distance based on the cube length parameter, if provided
     if isfield(params, 'cubeLength'); maxr = max(maxr, params.cubeLength/2); end
     L = max(4, 0.30 * maxr);          % triad axis length
-    boxDefault = max(5, 0.45 * maxr); % default body box size
 
     % --- figure ---
     fig = figure('Name', sprintf('Module: %s', m.module_type), 'Color', 'w');
@@ -155,17 +157,25 @@ function result = visualize_module(moduleYaml, configYaml)
     local_triad(ax, eye(4), L*1.3, 2.5, '-');
     text(ax, 0, 0, 0, '  world', 'FontWeight', 'bold', 'Color', [.2 .2 .2]);
 
-    % bodies as boxes
+    % bodies as imported geometry when available
     for k = 1:numel(bodies)
         b = bodies{k};
         if ~isKey(poses, b.name); continue; end
-        if isfield(params, 'cubeLength') && strcmp(m.module_type, 'Frame')
-            sz = params.cubeLength;
-        else
-            sz = boxDefault;
-        end
         Tb = poses(b.name);
-        local_box(ax, Tb, sz, [0.30 0.55 0.85], 0.12);
+        geomSpec = local_field(b, 'geometry', '');
+
+        geomPath = local_resolve_geometry_path(geomSpec, moduleDir, repoRoot);
+        if isempty(geomSpec)
+            % No body geometry: keep triads/labels only so pose checks still work.
+        elseif isempty(geomPath)
+            warning('visualize_module:geometryMissing', ...
+                'Body "%s" geometry file not found: %s', b.name, b.geometry);
+        else
+            geom = local_import_geometry(geomPath);
+            if ~isempty(geom)
+                local_patch_geometry(ax, Tb, geom, [0.30 0.55 0.85], 0.12);
+            end
+        end
         local_triad(ax, Tb, L, 1.5, '-');
         text(ax, Tb(1,4), Tb(2,4), Tb(3,4), ...
             ['  ' b.name], 'FontAngle', 'italic', 'Color', [0.1 0.2 0.5]);
@@ -190,7 +200,9 @@ function result = visualize_module(moduleYaml, configYaml)
 
         T = poses(f.name);
         isPort = isfield(f, 'exposed') && isequal(f.exposed, true);
+        
         pend = local_frame_pending(edges, f.name);
+
         if pend
             color = [1 0 1]; lw = 2.0; mk = 'magenta';
         elseif isPort
@@ -198,6 +210,7 @@ function result = visualize_module(moduleYaml, configYaml)
         else
             color = [0.4 0.4 0.4]; lw = 1.0; mk = 'frame';
         end
+
         local_triad(ax, T, L, lw, local_tern(isPort, '-', '--'));
         plot3(ax, T(1,4), T(2,4), T(3,4), 'o', 'MarkerSize', 5, ...
             'MarkerFaceColor', color, 'MarkerEdgeColor', color);
@@ -259,6 +272,69 @@ end
 
 function s = local_tern(cond, a, b)
     if cond; s = a; else; s = b; end
+end
+
+%% resolve a body geometry path independent of the current working directory
+function p = local_resolve_geometry_path(geomPath, moduleDir, repoRoot)
+    p = '';
+    if isempty(geomPath)
+        return;
+    end
+
+    candidates = {};
+    if local_is_absolute_path(geomPath)
+        candidates{end+1} = geomPath; %#ok<AGROW>
+    else
+        if startsWith(strrep(geomPath, '\', '/'), 'assets/')
+            candidates{end+1} = fullfile(repoRoot, geomPath); %#ok<AGROW>
+        end
+        candidates{end+1} = fullfile(moduleDir, geomPath); %#ok<AGROW>
+        candidates{end+1} = fullfile(repoRoot, geomPath); %#ok<AGROW>
+    end
+
+    for k = 1:numel(candidates)
+        cand = local_find_case_insensitive_file(candidates{k});
+        if ~isempty(cand)
+            p = cand;
+            return;
+        end
+    end
+end
+
+%% detect whether a path string is absolute on the current platform
+function tf = local_is_absolute_path(p)
+    if isempty(p)
+        tf = false;
+    elseif ispc
+        tf = ~isempty(regexp(p, '^[A-Za-z]:[\\/]', 'once')) || startsWith(p, '\\');
+    else
+        tf = startsWith(p, filesep);
+    end
+end
+
+%% find a file, tolerating case-only filename mismatches such as .STEP vs .step
+function p = local_find_case_insensitive_file(pathStr)
+    p = '';
+    if exist(pathStr, 'file')
+        p = pathStr;
+        return;
+    end
+
+    parentDir = fileparts(pathStr);
+    if isempty(parentDir) || ~exist(parentDir, 'dir')
+        return;
+    end
+
+    [~, name, ext] = fileparts(pathStr);
+    targetName = [name ext];
+    entries = dir(parentDir);
+
+    for k = 1:numel(entries)
+        if ~entries(k).isdir && strcmpi(entries(k).name, targetName)
+            p = fullfile(parentDir, entries(k).name);
+            return;
+        end
+    end
 end
 
 %% check if a frame is pending (not yet frozen) based on the edges
@@ -395,6 +471,53 @@ function R = local_roty(a); R = [cos(a) 0 sin(a); 0 1 0; -sin(a) 0 cos(a)]; end
 %% convert a rotation around the Z axis into a rotation matrix
 function R = local_rotz(a); R = [cos(a) -sin(a) 0; sin(a) cos(a) 0; 0 0 1]; end
 
+%% import geometry into surface patch data, preferring the referenced file
+function geom = local_import_geometry(geomPath)
+    geom = [];
+
+    [~, ~, ext] = fileparts(geomPath);
+
+    if strcmpi(ext, '.stl')
+        geom = local_import_stl_geometry(geomPath);
+        return;
+    end
+
+    warning('visualize_module:geometryUnsupported', ...
+        'Unsupported geometry format for visualization: %s', geomPath);
+end
+
+function geom = local_import_stl_geometry(stlPath)
+    geom = [];
+
+    if exist('stlread', 'file') ~= 2
+        warning('visualize_module:stlImportUnavailable', ...
+            'Skipping STL geometry %s because stlread is unavailable in this MATLAB environment.', stlPath);
+        return;
+    end
+
+    try
+        mesh = stlread(stlPath);
+
+        if isa(mesh, 'triangulation')
+            faces = mesh.ConnectivityList;
+            vertices = mesh.Points;
+        elseif isstruct(mesh) && isfield(mesh, 'ConnectivityList') && isfield(mesh, 'Points')
+            faces = mesh.ConnectivityList;
+            vertices = mesh.Points;
+        elseif isstruct(mesh) && isfield(mesh, 'faces') && isfield(mesh, 'vertices')
+            faces = mesh.faces;
+            vertices = mesh.vertices;
+        else
+            error('Unsupported stlread output type: %s', class(mesh));
+        end
+
+        geom = struct('Vertices', vertices, 'Faces', faces);
+    catch ME
+        warning('visualize_module:stlImportFailed', ...
+            'Failed to import STL geometry %s: %s', stlPath, ME.message);
+    end
+end
+
 % --- drawing ---
 %% draw a local triad (coordinate frame) at the origin of the given transformation matrix T, with specified axis length L, line width lw, and line style ls
 function local_triad(ax, T, L, lw, ls)
@@ -408,22 +531,71 @@ function local_triad(ax, T, L, lw, ls)
     for a = 1:3
         d = T(1:3, a);
 
+        % compute the endpoint
+        p1 = o + L * d;
+
         % plot a line from the origin to the endpoint of the axis in 3D space, using the specified color, line width, and line style
-        plot3(ax, [o(1) o(1)+L*d(1)], [o(2) o(2)+L*d(2)], [o(3) o(3)+L*d(3)], ...
+        plot3(ax, [o(1) p1(1)], [o(2) p1(2)], [o(3) p1(3)], ...
             'Color', cols{a}, 'LineWidth', lw, 'LineStyle', ls);
+
+        % draw arrowhead (cone-like basic shape using line segments)
+        headL = L * 0.15;  % arrow head length
+        headW = L * 0.05;  % arrow head width
+        if headL > 0
+            % find two orthogonal vectors to form the base of the arrow head
+            if abs(d(3)) < 0.9
+                u = cross([0; 0; 1], d);
+            else
+                u = cross([1; 0; 0], d);
+            end
+            u = u / norm(u);
+            v = cross(d, u);
+
+            % base points of the arrow head
+            pb = p1 - headL * d;
+            p1b1 = pb + headW * u;
+            p1b2 = pb - headW * u;
+            p1b3 = pb + headW * v;
+            p1b4 = pb - headW * v;
+
+            % plot arrow head lines
+            hX = [p1(1) p1b1(1) NaN p1(1) p1b2(1) NaN p1(1) p1b3(1) NaN p1(1) p1b4(1)];
+            hY = [p1(2) p1b1(2) NaN p1(2) p1b2(2) NaN p1(2) p1b3(2) NaN p1(2) p1b4(2)];
+            hZ = [p1(3) p1b1(3) NaN p1(3) p1b2(3) NaN p1(3) p1b3(3) NaN p1(3) p1b4(3)];
+            
+            line(ax, hX, hY, hZ, 'Color', cols{a}, 'LineWidth', lw, 'LineStyle', '-');
+        end
     end
 end
 
-%% draw a local box at the origin of the given transformation matrix T, with specified size, color, and transparency
-function local_box(ax, T, sz, color, alpha)
-    % define the vertices of a unit cube centered at the origin
-    V = 0.5 * [ -1 -1 -1; 1 -1 -1; 1 1 -1; -1 1 -1; ...
-                -1 -1  1; 1 -1  1; 1 1  1; -1 1  1 ];
-    % define the faces of the cube using the vertices
-    F = [1 2 3 4; 5 6 7 8; 1 2 6 5; 2 3 7 6; 3 4 8 7; 4 1 5 8];
-    % transform the vertices using the given transformation matrix T and scale by the specified size
-    Vw = (T(1:3,1:3) * (sz * V.') + T(1:3,4)).';
-    % create a patch object to represent the cube in 3D space
-    patch(ax, 'Vertices', Vw, 'Faces', F, 'FaceColor', color, ...
-        'FaceAlpha', alpha, 'EdgeColor', [0.35 0.35 0.35], 'LineWidth', 0.5);
+%% draw imported geometry at the origin of the given transformation matrix T
+function local_patch_geometry(ax, T, geom, color, alpha)
+    Vw = (T(1:3,1:3) * geom.Vertices.' + T(1:3,4)).';
+    patch(ax, 'Vertices', Vw, 'Faces', geom.Faces, 'FaceColor', color, ...
+        'FaceAlpha', alpha, 'EdgeColor', 'none', 'FaceLighting', 'gouraud', ...
+        'AmbientStrength', 0.35, 'DiffuseStrength', 0.75, 'SpecularStrength', 0.05);
+    local_draw_feature_edges(ax, Vw, geom.Faces, [0.75 0.75 0.75], 0.75);
+end
+
+%% draw only sharp feature edges so STL triangle mesh lines stay hidden
+function local_draw_feature_edges(ax, vertices, faces, color, lineWidth)
+    if size(faces, 2) ~= 3
+        return;
+    end
+
+    try
+        tr = triangulation(faces, vertices);
+        edgePairs = featureEdges(tr, deg2rad(20));  % 20 degrees threshold for sharp edges
+    catch
+        edgePairs = [];
+    end
+
+    if isempty(edgePairs)
+        return;
+    end
+
+    X = [vertices(edgePairs(:,1),1) vertices(edgePairs(:,2),1) nan(size(edgePairs,1),1)].';
+    Y = [vertices(edgePairs(:,1),2) vertices(edgePairs(:,2),2) nan(size(edgePairs,1),1)].';
+    Z = [vertices(edgePairs(:,1),3) vertices(edgePairs(:,2),3) nan(size(edgePairs,1),1)].';
+    line(ax, X(:), Y(:), Z(:), 'Color', color, 'LineWidth', lineWidth);
 end

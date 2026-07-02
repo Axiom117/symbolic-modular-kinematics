@@ -21,38 +21,23 @@ extraction_status: partial
 
 bodies:
   - name: body
-    geometry: assets/adaptor_45.STEP
+    geometry: assets/adaptor_45.stl
 
-# --- 端口框架表（rectify/align_axis 为内部中间 frame，不暴露；attachment_point/dock 均 plug）---
+# --- 端口框架表（mount_point 为和外部驱动器连接的点位，pin_connector 为与 M-REx Unit连接点位）---
 frames:
-  - { name: rectify, host: body, exposed: false }
-  - { name: align_axis, host: body, exposed: false }
-  - { name: attachment_point, host: body, exposed: true, semantic_tag: connector, polarity: plug }
-  - { name: dock, host: body, exposed: true, semantic_tag: dock, polarity: plug }
+  - { name: mount_point, host: body, exposed: true, semantic_tag: connector, polarity: plug }
+  - { name: pin_connector, host: body, exposed: true, semantic_tag: dock, polarity: plug }
 
-# --- 内部运动学图 · 固定变换（结构链已知，数值待 SLX 提取）---
+# --- 内部运动学图 · 固定变换 ---
 fixed_transforms:
   - from_frame: body
-    to_frame: rectify
-    translation: [0, 0, 0]
-    rotation: { pending: true }
+    to_frame: pin_connector
+    translation: [3.5355, 5, 3.5355] # sqrt(50)/2
+    rotation: { axis_angle: { omega: [0, 1, 0], q: 0.7854 } }
     provisional: true
-    note: rectify 级变换待从 SLX system_39 精确提取。
-  - from_frame: rectify
-    to_frame: align_axis
-    translation: [0, 0, 0]
-    rotation: { pending: true }
-    provisional: true
-    note: align_axis 级变换待从 SLX system_39 精确提取。
-  - from_frame: align_axis
-    to_frame: attachment_point
-    translation: [0, 0, 0]
-    rotation: { pending: true }
-    provisional: true
-    note: attachment_point 末级变换待从 SLX system_39 精确提取。
   - from_frame: body
-    to_frame: dock
+    to_frame: mount_point
     translation: [0, 0, 0]
-    rotation: { pending: true }
+    rotation: { align: { a: ["+Z", "+X"], b: ["+X", "+Z"] } }
     provisional: true
-    note: dock 侧直接派生变换待从 SLX system_39 精确提取。
+

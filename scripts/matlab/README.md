@@ -1,15 +1,14 @@
 　# scripts/matlab — 模块定义可视化校验
 
-> 用纯 MATLAB（无外部工具箱依赖）读取 `specs/modules/*.yaml` 模块定义，
-> 注入参数后构建内部坐标系图并可视化，用于**验证每个模块的文本定义是否能
-> 成功生成对应的模块描述**（端口/本体坐标系 + 简单几何体）。
+> 用 MATLAB 读取 `specs/modules/*.yaml` 模块定义，注入参数后构建内部坐标系图并可视化，
+> 用于**验证每个模块的文本定义是否能成功生成对应的模块描述**（端口/本体坐标系 + body 几何）。
 
 ## 文件
 
 | 文件 | 作用 |
 |------|------|
 | `read_module_yaml.m` | 极简 YAML 子集解析器（已对照 PyYAML 验证，逐文件一致） |
-| `visualize_module.m` | 解析单个模块 → 求解坐标系位姿 → 画三元轴 + body 方块 |
+| `visualize_module.m` | 解析单个模块 → 求解坐标系位姿 → 画三元轴 + 优先加载 body STEP 几何 |
 | `visualize_all_modules.m` | 批量跑完 `specs/modules/` 下全部模块 |
 | `module_viz_config.yaml` | 参数注入配置（按 `module_type` 提供 `cubeLength`/`tipDistance`/关节角等） |
 
@@ -35,7 +34,8 @@ disp(r.frames.linkB);
 ## 显示约定
 
 - **三元坐标轴**：X=红、Y=绿、Z=蓝。轴长按机构特征尺寸自适应。
-- **body**：半透明蓝色方块（简单几何占位，非真实 STEP）。Frame 模块用 `cubeLength` 定尺寸，其余用默认尺寸。
+- **body**：优先加载 `bodies[].geometry` 指向的 STEP 几何，按 body pose 变换后以半透明蓝色面片显示。
+- **几何缺失/失败**：若 `geometry` 缺失、路径无效、导入失败，或 MATLAB 当前不可用 STEP 导入 API，则不画 body 实体，仅保留 body triad、label 与各 frame/port。
 - **port**（`exposed: true`）：实线三元轴 + 实心点 + 粗体标签。
 - **内部 frame**（`exposed: false`，如 Adaptor 的 `rectify`/`align_axis`）：虚线三元轴 + 细标签。
 - **pending 旋转**（待 SLX 提取）：洋红色标注 `(pending R)`，旋转按单位阵占位。
@@ -60,8 +60,22 @@ disp(r.frames.linkB);
 
 未提供的符号会在求值时报明确错误，提示补进配置——这正是「定义能否成功生成描述」的校验点之一。
 
+## geometry 路径解析
+
+- `bodies[].geometry` 优先按仓库根相对路径解析，特别是 `assets/...` 会直接映射到仓库根下的 `assets/`。
+- 绝对路径会直接使用。
+- 其他相对路径会先相对模块 YAML 所在目录解析，再回退到仓库根解析。
+- 文件名大小写按宽松模式匹配，因此 YAML 中 `.STEP` 与仓库里 `.step` 不一致时仍可找到同名文件。
+
+## warning 行为
+
+- 缺失文件：发出 `visualize_module:geometryMissing` warning。
+- 缺少可用导入 API：发出 `visualize_module:geometryImportUnavailable` warning。
+- 文件存在但导入/网格化失败：发出 `visualize_module:geometryImportFailed` warning。
+- 上述 warning 都不会中断整次可视化；frame/port 报告仍会继续输出。
+
 ## 局限
 
 - 解析器只覆盖本项目模块/配置所用的 YAML 子集，非通用 YAML。
-- body 仅用方块占位，不加载 STEP 几何。
+- STEP 显示依赖 MATLAB 本地可用的几何导入能力；当前实现会在可用时导入并网格化，缺失时退化为“仅 frame/port”。
 - 关节默认按零位摆放（可经 config 指定角度）。

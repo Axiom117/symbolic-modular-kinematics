@@ -24,7 +24,7 @@ parameters:
 # --- 内部运动学图 · 刚体 ---
 bodies:
   - name: frame_hyper_cube
-    geometry: assets/frame_hyper_cube.STEP
+    geometry: assets/frame_hyper_cube.stl
 
 # --- 端口框架表 · 六面端口（均为 exposed frame，polarity: socket）---
 frames:
@@ -40,24 +40,24 @@ fixed_transforms:
   - from_frame: frame_hyper_cube
     to_frame: faceX+
     translation: [cubeLength/2, 0, 0]
-    rotation: { align: { a: ["+X", "+Y"], b: ["+Y", "+Z"] } }
+    rotation: { align: { a: ["+Z", "+X"], b: ["+X", "+Z"] } }
   - from_frame: frame_hyper_cube
     to_frame: faceX-
     translation: [-cubeLength/2, 0, 0]
-    rotation: { align: { a: ["+X", "+Y"], b: ["+Y", "+Z"] } }
+    rotation: { align: { a: ["+Z", "-X"], b: ["+X", "+Z"] } }
   - from_frame: frame_hyper_cube
     to_frame: faceY+
     translation: [0, cubeLength/2, 0]
-    rotation: { align: { a: ["+X", "+Y"], b: ["+Y", "+Z"] } }
+    rotation: { align: { a: ["+Z", "+Y"], b: ["+X", "+Z"] } }
   - from_frame: frame_hyper_cube
     to_frame: faceY-
     translation: [0, -cubeLength/2, 0]
-    rotation: { align: { a: ["+X", "+Y"], b: ["+Y", "+Z"] } }
+    rotation: { align: { a: ["+Z", "-Y"], b: ["+X", "+Z"] } }
   - from_frame: frame_hyper_cube
     to_frame: faceZ+
     translation: [0, 0, cubeLength/2]
-    rotation: { align: { a: ["+Y", "-Z"], b: ["+Z", "+X"] } }
+    rotation: { align: { a: ["+Z", "+Z"], b: ["+X", "+X"] } }
   - from_frame: frame_hyper_cube
     to_frame: faceZ-
     translation: [0, 0, -cubeLength/2]
-    rotation: { align: { a: ["+Z", "+X"], b: ["+Y", "+Z"] } }
+    rotation: { align: { a: ["+Z", "-Z"], b: ["+X", "+X"] } }

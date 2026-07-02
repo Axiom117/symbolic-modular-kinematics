@@ -17,7 +17,7 @@ extraction_status: partial
 
 bodies:
   - name: body
-    geometry: assets/connector_dowel_pin.step
+    geometry: assets/pin_connector.stl
 
 # --- 端口框架表（两端均 plug，贴到 Frame 的 socket 上）---
 frames:
@@ -29,12 +29,11 @@ fixed_transforms:
   - from_frame: body
     to_frame: sideA
     translation: [0, 0, 0]
-    rotation: { pending: true }
+    rotation: { align: { a: ["+Z", "+Y"], b: ["+X", "+Z"] } }
     provisional: true
-    note: sideA 朝向待从 SLX system_15 精确提取。
   - from_frame: body
     to_frame: sideB
     translation: [0, 0, 0]
-    rotation: { pending: true }
+    rotation: { align: { a: ["+Z", "-Y"], b: ["+X", "+Z"] } }
     provisional: true
-    note: sideB 朝向待从 SLX system_15 精确提取。
+
