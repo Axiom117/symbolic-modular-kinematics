@@ -1,0 +1,63 @@
+# yaml-language-server: $schema=../schema/module-definition.schema.yaml
+# 模块：Frame（立方体结构件）
+# 参考来源：mrex_hypercube_modules.slx → system_1.xml
+# 数据权威来源：modeling-conventions.md §5.1、module_library_reference.md
+#
+# 三层结构：
+#   模块定义表  —— 下方 module_type/category/dof/geometry/parameters
+#   端口框架表  —— frames（六个面端口）
+#   内部运动学图 —— bodies + fixed_transforms（中心 frame → 六面端口）
+
+module_type: Frame
+category: structural
+dof: 0
+description: 六面立方体结构件，每个面暴露一个连接端口。机构的主体骨架单元。
+source: mrex_hypercube_modules.slx#system_1
+extraction_status: complete
+
+# --- 模块定义表 · 参数 ---
+parameters:
+  - name: cubeLength
+    unit: mm
+    description: 立方体边长；各面端口沿对应轴偏移 cubeLength/2。
+
+# --- 内部运动学图 · 刚体 ---
+bodies:
+  - name: frame_hyper_cube
+    geometry: assets/frame_hyper_cube.STEP
+
+# --- 端口框架表 · 六面端口（均为 exposed frame，polarity: socket）---
+frames:
+  - { name: faceX+, host: body, exposed: true, semantic_tag: connector, polarity: socket }
+  - { name: faceX-, host: body, exposed: true, semantic_tag: connector, polarity: socket }
+  - { name: faceY+, host: body, exposed: true, semantic_tag: connector, polarity: socket }
+  - { name: faceY-, host: body, exposed: true, semantic_tag: connector, polarity: socket }
+  - { name: faceZ+, host: body, exposed: true, semantic_tag: connector, polarity: socket }
+  - { name: faceZ-, host: body, exposed: true, semantic_tag: connector, polarity: socket }
+
+# --- 内部运动学图 · 固定变换（body 中心 frame → 各面端口）---
+fixed_transforms:
+  - from_frame: frame_hyper_cube
+    to_frame: faceX+
+    translation: [cubeLength/2, 0, 0]
+    rotation: { align: { a: ["+X", "+Y"], b: ["+Y", "+Z"] } }
+  - from_frame: frame_hyper_cube
+    to_frame: faceX-
+    translation: [-cubeLength/2, 0, 0]
+    rotation: { align: { a: ["+X", "+Y"], b: ["+Y", "+Z"] } }
+  - from_frame: frame_hyper_cube
+    to_frame: faceY+
+    translation: [0, cubeLength/2, 0]
+    rotation: { align: { a: ["+X", "+Y"], b: ["+Y", "+Z"] } }
+  - from_frame: frame_hyper_cube
+    to_frame: faceY-
+    translation: [0, -cubeLength/2, 0]
+    rotation: { align: { a: ["+X", "+Y"], b: ["+Y", "+Z"] } }
+  - from_frame: frame_hyper_cube
+    to_frame: faceZ+
+    translation: [0, 0, cubeLength/2]
+    rotation: { align: { a: ["+Y", "-Z"], b: ["+Z", "+X"] } }
+  - from_frame: frame_hyper_cube
+    to_frame: faceZ-
+    translation: [0, 0, -cubeLength/2]
+    rotation: { align: { a: ["+Z", "+X"], b: ["+Y", "+Z"] } }

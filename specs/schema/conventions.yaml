@@ -6,20 +6,27 @@ status: frozen
 
 # 层级架构（自底向上四层，见 modeling-conventions.md §2）
 hierarchy:
-  L0: { name: Element, content: [Body, Frame, Port, FixedTransform, Joint, Constraint] }
-  L1: { name: Module, role: parameterized_template, instantiable: true, exposes_only: Port }
+  L0: { name: Element, content: [body, frame, port, fixedTransform, joint, constraint] }
+  L1: { name: Module, role: parameterized_template, instantiable: true, exposes_only: port }
   L2: { name: Mechanism, content: module_instances + connections, graph: [tree, general] }
   L3: { name: Execution, content: [world_frame, drivers], closes_system: true }
+
+naming:
+  element_types: lowerCamelCase
+  module_types: UpperCamelCase
+  instance_names: [lowerCamelCase, snake_case]
+  parameter_names: lowerCamelCase
+  fixed_keywords: [body, frame, port, fixedTransform, joint, constraint]
 
 # 建模原语：模块/机构/IR 只能由这些元件组合而成
 element_types:
   nodes:
-    Body: { dof: 0, geometry_host: true, center_frame: true, fields: [name, geometry?] }
-    Frame: { dof: 0, host: Body, fields: [name, host, exposed?, semantic_tag?] }   # Port = exposed:true; 位姿由 FixedTransform 给出
+    body: { dof: 0, geometry_host: true, center_frame: true, fields: [name, geometry?] }
+    frame: { dof: 0, host: body, fields: [name, host, exposed?, semantic_tag?, polarity?, symmetry?] }   # Port = exposed:true; 位姿由 fixedTransform 给出
   edges:
-    FixedTransform: { dof: 0, fields: [from_frame, to_frame, translation, rotation] }
-    Joint: { dof_min: 1, kinds: [revolute, prismatic], fields: [from_frame, to_frame, kind, axis, variable, limit?] }  # actuated 在执行层指派，非模块字段
-    Constraint: { generated_phase: A4, in_module_def: false, fields: [frame_pair, components] }
+    fixedTransform: { dof: 0, fields: [from_frame, to_frame, translation, rotation] }
+    joint: { dof_min: 1, kinds: [revolute, prismatic], fields: [from_frame, to_frame, kind, axis, variable, limit?] }  # actuated 在执行层指派，非模块字段
+    constraint: { generated_phase: A4, in_module_def: false, fields: [frame_pair, components] }
 
 coordinate_system:
   handedness: right
@@ -44,18 +51,31 @@ rotation:
   compose_order: translate_then_rotate   # p_parent = t + R*p_local
 
 port:
-  is_exposed_frame: true       # Port = exposed:true 的 Frame，非独立元件
-  placement_via: FixedTransform
+  is_exposed_frame: true       # Port = exposed:true 的 frame，非独立元件
+  placement_via: fixedTransform
   semantic_tag_affects_kinematics: false
   name_pattern: '^(face[XYZ][+-]|[a-zA-Z][a-zA-Z0-9_]*)$'
   unique_per_module: true
   semantic_tags: [connector, joint_side, tool, dock]
+  mating_normal: +Z_outward    # 所有 port 的 +Z 统一为朝模块外的对插法向（§9.1）
+  polarity_values: [socket, plug]   # socket = Frame 凹面钢片（唯一）；plug = 贴到 Frame 上的凸面磁铁
+  polarity_optional: true      # 任务/工具参考系（如 tip_origin）不带 polarity，不参与机械连接
+  default_symmetry: 4          # 绕 +Z 的旋转对称阶；缺省 4（方钢片 C4），约束连接 roll 离散取值
 
 connection:
-  types: [coincident, normal_aligned, adaptor]
+  types: [coincident]            # 唯一合法连接类型；重定义为「标准 mate 翻转后贴合」（见 modeling-conventions.md §10）
   max_use_per_port: 1
   allow_dangling: false        # 悬空端口须显式标记
   forbid_axis_conflict: true
+  polarity_rule: socket_plug_only   # 仅允许 socket↔plug；socket↔socket、plug↔plug、无 polarity 端口均非法
+  mate_transform: 'Rz(roll*360/symmetry) * Rx(pi)'   # 子(plug)相对父(socket)：Rx(pi) 面对面翻转 + Rz 离散滚转，平移 0
+  mate_flip_axis: X            # 冻结：mate 翻转绕 port +X 转 180°（+Z→-Z 反平行，+Y 翻转，+X 不变）
+  roll:
+    discrete: true             # 仅离散；真正连续转动须用 revolute Joint 模块表达
+    unit: symmetry_step         # 整数步进索引 k，实际角 = k * 360/symmetry 度
+    default: 0
+    valid: 'integer in 0..symmetry-1'
+  roll_continuous_via: Joint   # 需要运行时连续绕法向转动 → 插入 revolute Joint 模块（真自由度）
 
 parameter_scopes: [module-class, instance, mechanism-config]
 allow_symbolic_expressions: true

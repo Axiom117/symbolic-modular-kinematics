@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=../schema/module-definition.schema.yaml
+# 模块：Joint（铰接关节件）
+# 参考来源：mrex_hypercube_modules.slx → system_21.xml
+# 数据权威来源：modeling-conventions.md §5.3、module_library_reference.md
+#
+# 唯一的运动模块：内部封装一个 1-DOF revolute 关节（变量 q）。
+# 端口平移/对齐已知；关节轴方向在参考摘要中标注「待 A.1 从 SLX 精确提取」，
+# 当前以 provisional 占位（+Z），extraction_status 因此为 partial。
+#
+# 拓扑链：linkA ←fixedTransform— bodyA —[joint: revolute(q)]— bodyB —fixedTransform→ linkB
+
+module_type: Joint
+category: kinematic
+dof: 1
+geometry: assets/linkage_hinge_joint.STEP
+description: 单自由度铰接关节，两侧刚体经固定变换接入中间转动副。
+source: mrex_hypercube_modules.slx#system_21
+extraction_status: partial
+
+# --- 内部运动学图 · 刚体（两侧）---
+bodies:
+  - name: bodyA
+    geometry: assets/linkage_hinge_joint.STEP
+  - name: bodyB
+    geometry: assets/linkage_hinge_joint.STEP
+
+# --- 端口框架表（两端均 plug，贴到 Frame 的 socket 上）---
+frames:
+  - { name: linkA, host: bodyA, exposed: true, semantic_tag: joint_side, polarity: plug }
+  - { name: linkB, host: bodyB, exposed: true, semantic_tag: joint_side, polarity: plug }
+
+# --- 内部运动学图 · 固定变换（各侧 body 中心 frame → 对应端口）---
+fixed_transforms:
+  - from_frame: bodyA
+    to_frame: linkA
+    translation: [0, -5, 0]
+    rotation: { align: { a: ["+X", "+Y"], b: ["+Y", "+Z"] } }
+  - from_frame: bodyB
+    to_frame: linkB
+    translation: [0, -5, 0]
+    rotation: { align: { a: ["+X", "+Y"], b: ["+Y", "+Z"] } }
+
+# --- 内部运动学图 · 关节（1-DOF revolute）---
+joints:
+  - from_frame: bodyA
+    to_frame: bodyB
+    kind: revolute
+    axis: [0, 0, 1]
+    variable: q
+    provisional: true
+    note: 关节轴方向待从 SLX system_21 精确提取；当前以 +Z 占位。

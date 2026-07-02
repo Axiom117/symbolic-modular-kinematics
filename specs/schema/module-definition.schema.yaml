@@ -1,0 +1,312 @@
+# 模块定义 schema（阶段 A.1）
+# Module-definition schema for the L1 module library.
+#
+# 这是 JSON Schema，用于校验 specs/modules/*.yaml
+# 中的每一份模块（Module，L1）文本定义。schema 严格遵循
+# ../modeling-conventions.md 与 ./conventions.yaml；凡冲突以约定文档为准。
+#
+# 三层数据结构（A.1 要求，见 modeling-conventions.md §2.2、A.1 任务）：
+#   1. 模块定义表  —— 顶层字段：module_type / category / dof / geometry / parameters
+#   2. 端口框架表  —— frames（其中 exposed:true 即 port）
+#   3. 内部运动学图 —— bodies + fixed_transforms + joints
+#
+# 元件名（body/frame/fixedTransform/joint）为 lowerCamelCase 固定关键字；
+# 模块名 module_type 为 UpperCamelCase（库内遗留名 Pipette_body 含下划线，见 §4）。
+
+title: ModuleDefinition
+description: >-
+  单个模块类（L1 Module）的文本定义。一个模块由内部 body / frame /
+  fixedTransform / joint 元件组合而成，对外只暴露 exposed:true 的 frame（port）。
+type: object
+additionalProperties: false
+
+required:
+  - module_type
+  - category
+  - dof
+  - bodies
+  - frames
+  - fixed_transforms
+
+# ---------------------------------------------------------------------------
+# 复用定义
+# ---------------------------------------------------------------------------
+$defs:
+
+  identifier:
+    description: 模块内唯一标识符（lowerCamelCase / snake_case，不得与元件关键字重名）。
+    type: string
+    pattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
+
+  portName:
+    description: 端口名，遵循 modeling-conventions.md §9.2（face[XYZ][+-] 或语义名）。
+    type: string
+    pattern: "^(face[XYZ][+-]|[a-zA-Z][a-zA-Z0-9_]*)$"
+
+  axisToken:
+    description: 带符号的坐标轴记号，如 +X、-Z（用于 align 旋转规则）。
+    type: string
+    pattern: "^[+-][XYZ]$"
+
+  unitAxis:
+    description: 单位向量（关节轴 / 轴角的 omega），分量可为符号表达式。
+    type: array
+    minItems: 3
+    maxItems: 3
+    items:
+      type: [number, string]
+
+  scalarOrExpr:
+    description: 数值或保留的符号表达式（如 cubeLength/2、-tipDistance）。
+    type: [number, string]
+
+  translation:
+    description: 平移 [x, y, z]，单位 mm；分量可为符号表达式（见 §7、§11）。
+    type: array
+    minItems: 3
+    maxItems: 3
+    items:
+      $ref: "#/$defs/scalarOrExpr"
+
+  # 旋转的四种等价表示，任选其一。authoritative 为 axis_angle（§8）；
+  # align 为本模块库参考数据采用的双轴对齐形式（§9.4）；
+  # pending 表示该旋转的精确值待从 SLX 提取（A.1 期间 SLX 二进制不可用时使用）。
+  rotation:
+    oneOf:
+      - type: object
+        additionalProperties: false
+        required: [rpy]
+        properties:
+          rpy:
+            description: Z-Y-X 内旋欧拉角 [Rx, Ry, Rz]，单位 rad（§8）。
+            type: array
+            minItems: 3
+            maxItems: 3
+            items:
+              $ref: "#/$defs/scalarOrExpr"
+      - type: object
+        additionalProperties: false
+        required: [axis_angle]
+        properties:
+          axis_angle:
+            description: 权威表示，轴 omega + 转角 q（Rodrigues，§8）。
+            type: object
+            additionalProperties: false
+            required: [omega, q]
+            properties:
+              omega: { $ref: "#/$defs/unitAxis" }
+              q: { $ref: "#/$defs/scalarOrExpr" }
+      - type: object
+        additionalProperties: false
+        required: [align]
+        properties:
+          align:
+            description: >-
+              双轴对齐规则（§9.4）：a、b 各为 [源轴, 目标轴]；第三轴由右手系唯一推出。
+            type: object
+            additionalProperties: false
+            required: [a, b]
+            properties:
+              a:
+                type: array
+                minItems: 2
+                maxItems: 2
+                items: { $ref: "#/$defs/axisToken" }
+              b:
+                type: array
+                minItems: 2
+                maxItems: 2
+                items: { $ref: "#/$defs/axisToken" }
+      - type: object
+        additionalProperties: false
+        required: [pending]
+        properties:
+          pending:
+            description: 旋转精确值待从 SLX 提取；校验器应将其标记为未冻结。
+            const: true
+
+  parameter:
+    description: 模块类作用域参数（module-class scope，§11）；不在此处取值。
+    type: object
+    additionalProperties: false
+    required: [name]
+    properties:
+      name: { $ref: "#/$defs/identifier" }
+      unit:
+        type: string
+        enum: [mm, rad, deg, none]
+      description: { type: string }
+
+  body:
+    description: 内部刚体；自动拥有同名中心 frame（§3.1）。
+    type: object
+    additionalProperties: false
+    required: [name]
+    properties:
+      name: { $ref: "#/$defs/identifier" }
+      geometry:
+        description: STEP/网格资源名，仅供可视，不参与运动学。
+        type: string
+
+  frame:
+    description: 局部右手坐标系；exposed:true 即为 port（§3.2）。
+    type: object
+    additionalProperties: false
+    required: [name, host]
+    properties:
+      name: { $ref: "#/$defs/portName" }
+      host:
+        description: 宿主 body 名（基准为其中心 frame）。
+        $ref: "#/$defs/identifier"
+      exposed:
+        description: 真即为 port，可跨模块连接；缺省 false。
+        type: boolean
+      semantic_tag:
+        description: 仅注释，不影响运动学（§9.3）。
+        type: string
+        enum: [connector, joint_side, tool, dock]
+      polarity:
+        description: >-
+          机械对接极性（§9.5）：socket = 凹面钢片（仅 Frame 面），plug = 凸面磁铁
+          （其余贴到 Frame 上的机械面）。连接仅允许 socket↔plug。可选：任务/工具
+          参考系（如 tip_origin）不带 polarity，只作 FK/IK 输出，不参与机械连接。
+        type: string
+        enum: [socket, plug]
+      symmetry:
+        description: >-
+          绕 +Z 对插法向的旋转对称阶（§9.6）：绕法向每转 360/symmetry 度机械接口
+          自我等价。缺省 4（当前方钢片接口 C4）。约束连接 roll 的合法离散取值。
+        type: integer
+        minimum: 1
+
+  fixedTransform:
+    description: 两 frame 间无自由度刚性位姿，先平移后旋转（§3.3、§8）。
+    type: object
+    additionalProperties: false
+    required: [from_frame, to_frame, translation, rotation]
+    properties:
+      from_frame:
+        description: 源坐标系（body 名指其中心 frame）。
+        $ref: "#/$defs/portName"
+      to_frame: { $ref: "#/$defs/portName" }
+      translation: { $ref: "#/$defs/translation" }
+      rotation: { $ref: "#/$defs/rotation" }
+      provisional:
+        description: 真表示数值为占位值，待 SLX 核实，未冻结。
+        type: boolean
+      note: { type: string }
+
+  joint:
+    description: 引入自由度的运动副，本阶段以 1-DOF revolute 为主（§3.4）。
+    type: object
+    additionalProperties: false
+    required: [from_frame, to_frame, kind, axis, variable]
+    properties:
+      from_frame: { $ref: "#/$defs/portName" }
+      to_frame: { $ref: "#/$defs/portName" }
+      kind:
+        type: string
+        enum: [revolute, prismatic]
+      axis:
+        description: 单位关节轴（revolute 转轴 / prismatic 滑动方向，§8）。
+        $ref: "#/$defs/unitAxis"
+      variable:
+        description: revolute 用 q、prismatic 用 d（§11）。
+        type: string
+        pattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
+      limit:
+        description: 角度 rad / 位移 mm，缺省无界。
+        type: array
+        minItems: 2
+        maxItems: 2
+        items: { $ref: "#/$defs/scalarOrExpr" }
+      provisional:
+        description: 真表示 axis 等数值为占位值，待 SLX 核实。
+        type: boolean
+      note: { type: string }
+
+# ---------------------------------------------------------------------------
+# 顶层（模块定义表）
+# ---------------------------------------------------------------------------
+properties:
+
+  module_type:
+    description: 模块类唯一名（UpperCamelCase；库内遗留名允许下划线，§4）。
+    type: string
+    pattern: "^[A-Z][A-Za-z0-9]*(_[A-Za-z0-9]+)*$"
+
+  category:
+    description: 结构模块（0 DOF）或运动模块（含自由度），见 §2.2。
+    type: string
+    enum: [structural, kinematic]
+
+  dof:
+    description: 模块内部总自由度。
+    type: integer
+    minimum: 0
+
+  geometry:
+    description: 模块主几何资源名，仅供可视。
+    type: string
+
+  description:
+    type: string
+
+  source:
+    description: 文本定义的参考来源（SLX 子系统等），供追溯。
+    type: string
+
+  extraction_status:
+    description: >-
+      complete = 全部数值已从参考冻结；partial = 含 provisional/pending 项，
+      待 SLX 二进制核实。
+    type: string
+    enum: [complete, partial]
+
+  parameters:
+    description: 模块定义表 · 模块类作用域参数。
+    type: array
+    items: { $ref: "#/$defs/parameter" }
+
+  bodies:
+    description: 内部运动学图 · 刚体节点。
+    type: array
+    minItems: 1
+    items: { $ref: "#/$defs/body" }
+
+  frames:
+    description: 端口框架表 · 全部局部坐标系（exposed:true 即 port）。
+    type: array
+    minItems: 1
+    items: { $ref: "#/$defs/frame" }
+
+  fixed_transforms:
+    description: 内部运动学图 · 0-DOF 边。
+    type: array
+    items: { $ref: "#/$defs/fixedTransform" }
+
+  joints:
+    description: 内部运动学图 · ≥1-DOF 边。结构模块为空或省略。
+    type: array
+    items: { $ref: "#/$defs/joint" }
+
+# ---------------------------------------------------------------------------
+# 跨字段一致性约束
+# ---------------------------------------------------------------------------
+allOf:
+  # 结构模块不得含 joint 且 dof 必须为 0
+  - if:
+      properties:
+        category: { const: structural }
+    then:
+      properties:
+        dof: { const: 0 }
+        joints: { maxItems: 0 }
+  # 运动模块必须含至少一个 joint
+  - if:
+      properties:
+        category: { const: kinematic }
+    then:
+      required: [joints]
+      properties:
+        joints: { minItems: 1 }

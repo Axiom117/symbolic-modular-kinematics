@@ -1,0 +1,58 @@
+# yaml-language-server: $schema=../schema/module-definition.schema.yaml
+# 模块：Adaptor（坐标适配件）
+# 参考来源：mrex_hypercube_modules.slx → system_39.xml
+# 数据权威来源：modeling-conventions.md §5.4、module_library_reference.md
+#
+# 适配模块：dock 侧直接派生；attachment_point 侧经 rectify → align_axis 两级重定向。
+# 内部链结构已知，但各级变换精确数值在参考摘要中标注「待 A.1 从 SLX 精确提取」。
+# 当前 SLX 二进制不在工作区，全部变换以 pending/provisional 占位，extraction_status 为 partial。
+#
+# 拓扑：
+#   body —fixedTransform(rectify)→ rectify —fixedTransform(align_axis)→ align_axis —→ attachment_point
+#   body —fixedTransform→ dock
+
+module_type: Adaptor
+category: structural
+dof: 0
+geometry: assets/adaptor_45.STEP
+description: 坐标适配件，把一侧端口坐标系经两级重定向适配到另一侧对接面。
+source: mrex_hypercube_modules.slx#system_39
+extraction_status: partial
+
+bodies:
+  - name: body
+    geometry: assets/adaptor_45.STEP
+
+# --- 端口框架表（rectify/align_axis 为内部中间 frame，不暴露；attachment_point/dock 均 plug）---
+frames:
+  - { name: rectify, host: body, exposed: false }
+  - { name: align_axis, host: body, exposed: false }
+  - { name: attachment_point, host: body, exposed: true, semantic_tag: connector, polarity: plug }
+  - { name: dock, host: body, exposed: true, semantic_tag: dock, polarity: plug }
+
+# --- 内部运动学图 · 固定变换（结构链已知，数值待 SLX 提取）---
+fixed_transforms:
+  - from_frame: body
+    to_frame: rectify
+    translation: [0, 0, 0]
+    rotation: { pending: true }
+    provisional: true
+    note: rectify 级变换待从 SLX system_39 精确提取。
+  - from_frame: rectify
+    to_frame: align_axis
+    translation: [0, 0, 0]
+    rotation: { pending: true }
+    provisional: true
+    note: align_axis 级变换待从 SLX system_39 精确提取。
+  - from_frame: align_axis
+    to_frame: attachment_point
+    translation: [0, 0, 0]
+    rotation: { pending: true }
+    provisional: true
+    note: attachment_point 末级变换待从 SLX system_39 精确提取。
+  - from_frame: body
+    to_frame: dock
+    translation: [0, 0, 0]
+    rotation: { pending: true }
+    provisional: true
+    note: dock 侧直接派生变换待从 SLX system_39 精确提取。
