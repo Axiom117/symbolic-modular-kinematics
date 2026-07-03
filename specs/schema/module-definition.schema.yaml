@@ -11,7 +11,7 @@
 #   3. 内部运动学图 —— bodies + fixed_transforms + joints
 #
 # 元件名（body/frame/fixedTransform/joint）为 lowerCamelCase 固定关键字；
-# 模块名 module_type 为 UpperCamelCase（库内遗留名 Pipette_body 含下划线，见 §4）。
+# 模块名 module_type 为 UpperCamelCase（如 ToolPipette，见 §4）。
 
 title: ModuleDefinition
 description: >-

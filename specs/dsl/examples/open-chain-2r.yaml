@@ -38,7 +38,7 @@ instances:
   frame2:
     type: Frame
   pipette:
-    type: Pipette_body
+    type: ToolPipette
 
 connections:
   # 第一段：frame0(socket) — joint1(plug)
@@ -46,6 +46,7 @@ connections:
   - ports: [joint1.linkB, frame1.faceX-]
   # 第二段：frame1(socket) — joint2(plug)
   - ports: [frame1.faceX+, joint2.linkA]
+    roll: 1
   - ports: [joint2.linkB, frame2.faceX-]
   # 工具末端：frame2(socket) — pipette(plug)
-  - ports: [frame2.faceZ+, pipette.connector_side]
+  - ports: [frame2.faceY+, pipette.connector_side]

@@ -59,7 +59,7 @@ connections:
 | `Manipulator` | `dock` |
 
 其余一切机械对接面（`Pin.sideA/B`、`Joint.linkA/B`、`Adaptor.attachment_point/pin_connector`、
-`Pipette_body.connector_side`）均为 `plug`。故合法连接必有一端来自上表。
+`ToolPipette.connector_side`）均为 `plug`。故合法连接必有一端来自上表。
 
 ---
 
@@ -96,7 +96,7 @@ connections:
 ## 4. 极性门控
 
 - 连接仅允许 `socket↔plug`。`socket↔socket`、`plug↔plug`、以及任一端无极性（任务系如
-  `Pipette_body.tip_origin`、接地系如 `Manipulator.ground`）均由解释器直接判非法。
+  `ToolPipette.tip_origin`、接地系如 `Manipulator.ground`）均由解释器直接判非法。
 - 极性只是**逻辑门控**，决定连接是否被允许，不产生几何；连接几何仍由 §2 的 mate 变换给出。
 - 每个端口**至多被占用一次**；重复占用为非法。
 

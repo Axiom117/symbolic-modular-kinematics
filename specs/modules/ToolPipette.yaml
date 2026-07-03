@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=../schema/module-definition.schema.yaml
-# 模块：Pipette_body（工具末端件）
+# 模块：ToolPipette（工具末端件）
 # 参考来源：mrex_hypercube_modules.slx → system_32.xml
 # 数据权威来源：modeling-conventions.md §5.5、module_library_reference.md
 #

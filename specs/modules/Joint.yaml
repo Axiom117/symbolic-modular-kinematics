@@ -46,12 +46,12 @@ frames:
 fixed_transforms:
   - from_frame: bodyA
     to_frame: linkA
-    translation: [0, 5, 0]
-    rotation: { align: { a: ["+Z", "+Y"], b: ["+X", "+Z"] } }
+    translation: [0, -5, 0]
+    rotation: { align: { a: ["+Z", "-Y"], b: ["+X", "+Z"] } }
   - from_frame: bodyB
     to_frame: linkB
-    translation: [0, 5, 0]
-    rotation: { align: { a: ["+Z", "+Y"], b: ["+X", "-Z"] } }
+    translation: [0, -5, 0]
+    rotation: { align: { a: ["+Z", "-Y"], b: ["+X", "-Z"] } }
   # 展开参考（对称拆分）：把「合拢零位 → 展开零位」的 180° 拆成两个 +90°，各自绕
   # 铰链轴 (+X) 施加于一侧 body↔hinge。align 形式 {+Y→+Z, +Z→-Y} 即 Rx(+90°)。
   # 平移暂取 0；真实铰链线偏移待 SLX 提取。

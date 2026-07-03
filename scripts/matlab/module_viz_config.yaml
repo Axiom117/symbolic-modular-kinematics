@@ -17,5 +17,5 @@ Joint:
   q: 0
 Adaptor: {}
 
-Pipette_body:
+ToolPipette:
   tipDistance: 30

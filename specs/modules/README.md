@@ -13,7 +13,7 @@
 | [pin.yaml](pin.yaml) | `Pin` 销钉连接件 | structural | 0 |
 | [joint.yaml](joint.yaml) | `Joint` 铰接关节件 | kinematic | 1 |
 | [adaptor.yaml](adaptor.yaml) | `Adaptor` 坐标适配件 | structural | 0 |
-| [toolPipette.yaml](toolPipette.yaml) | `Pipette_body` 工具末端件 | structural | 0 |
+| [toolPipette.yaml](toolPipette.yaml) | `ToolPipette` 工具末端件 | structural | 0 |
 | [Manipulator.yaml](Manipulator.yaml) | `Manipulator` 外部驱动接口件（非 SLX） | kinematic | 3 |
 | [config/parameters.yaml](config/parameters.yaml) | 模块参数取值配置（按 module_type → 参数值映射；v0 禁止 variant） | config | — |
 | [slx-to-text-mapping.md](slx-to-text-mapping.md) | SLX → 文本 一一映射表 | — | — |

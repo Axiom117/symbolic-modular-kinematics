@@ -35,7 +35,7 @@ instances:
   platformHub:
     type: Frame
   pipette:
-    type: Pipette_body
+    type: ToolPipette
   # 支链 1
   j1a:
     type: Joint

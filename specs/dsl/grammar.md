@@ -118,13 +118,13 @@ instances:
 ### 4.3 类型引用规则
 
 - `type` 的取值必须等于模块库中某个模块文件的 `module_type` 字段（如 `Frame`、`Joint`、
-  `Adaptor`、`Manipulator`、`Pin`、`Pipette_body`）。
-- 采用 **UpperCamelCase**（模块类型名规则）；库内保留 SLX 原名者可含下划线（如 `Pipette_body`）。
+  `Adaptor`、`Manipulator`、`Pin`、`ToolPipette`）。
+- 采用 **UpperCamelCase**（模块类型名规则），不含下划线。
 - 「该 `module_type` 是否存在」属于跨文件校验，Schema 无法覆盖，由解释器加载模块库后校验（§7）。
 
 ### 4.4 实例参数规则（v0）
 
-- 模块类参数（如 `Frame.cubeLength`、`Pipette_body.tipDistance`）在 **L1 模块定义**
+- 模块类参数（如 `Frame.cubeLength`、`ToolPipette.tipDistance`）在 **L1 模块定义**
   中**声明**（`name`/`unit`/`description`），但**取值**由独立配置文件
   `specs/modules/config/parameters.yaml` 注入——该文件按 `module_type` 映射参数名到具体数值。
   解释器在加载模块库时读取此配置，将参数值注入模块类。
@@ -144,7 +144,7 @@ instances:
   joint1:
     type: Joint          # 无实例参数
   pipette:
-    type: Pipette_body
+    type: ToolPipette
 ```
 
 ---

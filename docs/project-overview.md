@@ -97,7 +97,7 @@
 整个符号化体系自底向上分为四层，每层只由下一层组合而成，不跨层耦合：
 
 - **L0 元件（Element）**：建模原语，即 `Body`、`Frame`、`Port`、`FixedTransform`、`Joint`、`Constraint`。类比 Simscape 基本块或 URDF 基本类型，是体系最底层、不可再分的语素。
-- **L1 模块（Module）**：把若干元件封装成的**参数化模板**，相当于一个类——定义一次、多次实例化。参考来源是 `slx_module_reference` 的库模块（`Frame`、`Pin`、`Joint`、`Adaptor`、`Pipette_body`），类比 Simulink 的 masked subsystem / library，或 OOP 的类加 xacro 宏。注意模块层的「`Frame` 模块」与元件层的「`Frame` 坐标系」同名但不同物。模块对外只暴露 `Port`。
+- **L1 模块（Module）**：把若干元件封装成的**参数化模板**，相当于一个类——定义一次、多次实例化。参考来源是 `slx_module_reference` 的库模块（`Frame`、`Pin`、`Joint`、`Adaptor`、`ToolPipette`），类比 Simulink 的 masked subsystem / library，或 OOP 的类加 xacro 宏。注意模块层的「`Frame` 模块」与元件层的「`Frame` 坐标系」同名但不同物。模块对外只暴露 `Port`。
 - **L2 机构（Mechanism）**：多个模块实例按端口连接组成的机构本体，类比 Simulink 子系统。机构只描述「本体长什么样、怎么拼」，可以是开环（树）或含闭环（一般图）。
 - **L3 执行层（Execution）**：把机构本体接入世界系与驱动源，闭合成自洽、可求解的系统。它定义「机构如何被固定、如何被驱动、闭环判据是什么」。
   - **世界系闭环（M-REx 主构型，主导模式）**：当前绝大多数模块化 M-REx 配置采用此模式。机构本体在 DSL 中描述为**开环链**（不写 `closed: true`），挂载到多台外部驱动器（`Manipulator` 模块）上。每台 `Manipulator` 的 `ground` frame 在 L3 绑定到同一 `world` 原点，形成回路 `世界原点 → 驱动 #1 → 机构本体 → 驱动 #2 → 世界原点`。**闭合不发生在模块端口之间，而发生在世界原点**——因为两条独立树共享同一 `world` 根。闭合判据为 L3 `closure_cuts` 声明的切口处相对位姿残差。外部驱动器由 `Manipulator` 关节模块物化（内部三个 `prismatic` 组合成 3-DOF 笛卡尔驱动，机构侧以 `socket` 对接，世界侧以 `ground` frame 由 L3 绑定到 `world`）。
@@ -135,7 +135,7 @@
 
 目标：把现有 Simulink 模块库抽象成文本优先的模块定义表，先建立最小闭环机构所需的核心模块集。
 
-起步建议直接以当前已拆解的库模块为最小集合：`Frame`、`Pin`、`Joint`、`Adaptor`、`Pipette_body`。`slx` 只作为参考源，最终权威定义必须落在文本格式中。
+起步建议直接以当前已拆解的库模块为最小集合：`Frame`、`Pin`、`Joint`、`Adaptor`、`ToolPipette`。`slx` 只作为参考源，最终权威定义必须落在文本格式中。
 
 具体任务：
 
@@ -161,7 +161,7 @@
 | `specs/modules/Pin.yaml` | `Pin` 销钉连接件（structural, 0 DOF, 1 body + 2 plug 端口） |
 | `specs/modules/Joint.yaml` | `Joint` 铰接关节件（kinematic, 1 DOF revolute, 2 bodies + 2 plug 端口） |
 | `specs/modules/Adaptor.yaml` | `Adaptor` 坐标适配件（structural, 0 DOF, 1 body + 2 plug 端口） |
-| `specs/modules/ToolPipette.yaml` | `Pipette_body` 工具末端件（structural, 0 DOF, 1 body + 1 plug + 1 任务系） |
+| `specs/modules/ToolPipette.yaml` | `ToolPipette` 工具末端件（structural, 0 DOF, 1 body + 1 plug + 1 任务系） |
 | `specs/modules/Manipulator.yaml` | `Manipulator` 外部驱动接口件（kinematic, 3 DOF cartesian = 3 prismatic, 4 bodies + 1 socket + 1 ground frame, 非 SLX 来源） |
 
 过关标准：

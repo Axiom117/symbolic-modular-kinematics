@@ -31,7 +31,7 @@
 | `Frame` | `system_1.xml` | `faceX+`, `faceX-`, `faceY+`, `faceY-`, `faceZ+`, `faceZ-` | `assets/frame_hyper_cube.STEP` | 1 个主体 + 6 个面参考框架 |
 | `Pin` | `system_15.xml` | `sideA`, `sideB` | `assets/connector_dowel_pin.step` | 1 个主体 + 2 个连接侧 |
 | `Joint` | `system_21.xml` | `linkA`, `linkB` | `assets/linkage_hinge_joint.STEP` | 2 个主体 + 1 个转动副 |
-| `Pipette_body` | `system_32.xml` | `connector_side`, `tip_origin` | `assets/tool.STEP` | 1 个主体 + 连接端 + 针尖原点 |
+| `ToolPipette` | `system_32.xml` | `connector_side`, `tip_origin` | `assets/tool.STEP` | 1 个主体 + 连接端 + 针尖原点 |
 | `Adaptor` | `system_39.xml` | `attachment_point`, `dock` | `assets/adaptor_45.STEP` | 1 个主体 + 2 级对齐框架 |
 
 ## 各模块可抽取定义
@@ -109,9 +109,9 @@
 - 一个内部 1-DOF 转动副
 - 两个外部参考框架到关节轴的固定位姿映射
 
-### 4. Pipette_body
+### 4. ToolPipette
 
-`Pipette_body` 是一个单主体工具模块，包含一个连接侧和一个工具尖端参考点。
+`ToolPipette` 是一个单主体工具模块，包含一个连接侧和一个工具尖端参考点。
 
 可直接抽取的字段：
 

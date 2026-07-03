@@ -48,7 +48,7 @@ $defs:
     pattern: "^[a-z][a-zA-Z0-9_]*$"
 
   moduleType:
-    description: 引用的模块 module_type（UpperCamelCase；库内遗留名可含下划线，如 Pipette_body）。
+    description: 引用的模块 module_type（UpperCamelCase；如 ToolPipette）。
     type: string
     pattern: "^[A-Z][A-Za-z0-9_]*$"
 

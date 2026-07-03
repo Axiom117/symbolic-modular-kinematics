@@ -1,0 +1,395 @@
+function result = visualize_mechanism(dslYaml, configYaml)
+%VISUALIZE_MECHANISM  Validate & visualize a full modular mechanism assembly.
+%   VISUALIZE_MECHANISM(DSLYAML) parses a mechanism-assembly DSL file from
+%   specs/dsl/examples/*.yaml, loads every referenced L1 module definition
+%   from the module library, expands each instance's internal frame graph,
+%   mates instances port-to-port per the connections list, propagates global
+%   poses via forward kinematics, and draws:
+%     - each body as imported STEP geometry when available (colored by type)
+%     - each frame/port as an RGB coordinate triad (X=red, Y=green, Z=blue)
+%     - each mate as a diagnostic segment between the paired port origins
+%       (zero-length when aligned; a visible gap reveals mis-mated ports)
+%     - each 1-DOF joint axis as a highlighted segment
+%
+%   VISUALIZE_MECHANISM(DSLYAML, CONFIGYAML) also injects per-instance joint
+%   variable values (revolute q, prismatic dx/dy/dz) from a config YAML keyed
+%   by mechanism name -> instance name -> variable. Unlisted joint variables
+%   default to 0 (zero pose). Geometric module parameters (cubeLength,
+%   tipDistance, ...) still come from <module_library>/config/parameters.yaml
+%   keyed by module_type.
+%
+%   RESULT = VISUALIZE_MECHANISM(...) returns a struct with the mechanism
+%   name, the computed global pose map (frame name -> 4x4), and the list of
+%   any frames that could not be placed, useful for headless checking.
+%
+%   Example:
+%     visualize_mechanism('../../specs/dsl/examples/open-chain-2r.yaml', ...
+%                         'mechanism_viz_config.yaml')
+%
+%   Shared primitives (rotation/geometry/FK) live in scripts/matlab/private/
+%   and are reused verbatim from visualize_module.m. Mate convention follows
+%   specs/modeling-conventions.md and specs/dsl/connection-semantics.md:
+%     T_plug<-socket = Rz(roll*2*pi/symmetry) * Rx(pi),  t = 0.
+%   socket is the parent (Frame face / Manipulator dock); plug is the child.
+
+    if nargin < 1 || isempty(dslYaml)
+        error('visualize_mechanism:usage', ...
+            'Usage: visualize_mechanism(dslYaml[, configYaml])');
+    end
+    if nargin < 2; configYaml = ''; end
+
+    here = fileparts(mfilename('fullpath'));
+    dslYaml = local_resolve(dslYaml, here);
+    assert(exist(dslYaml, 'file') > 0, 'DSL file not found: %s', dslYaml);
+
+    dsl = read_module_yaml(dslYaml);
+    assert(isfield(dsl, 'mechanism'), 'Not a mechanism assembly: %s', dslYaml);
+    ver = local_field(dsl, 'dsl_version', 0);
+    assert(isequal(ver, 0), 'Unsupported dsl_version %s (expected 0).', num2str(ver));
+
+    mechName = dsl.mechanism;
+    dslDir = fileparts(dslYaml);
+
+    % --- module library + parameter config ---
+    libRel = local_field(dsl, 'module_library', '../../modules/');
+    libDir = local_resolve(libRel, dslDir);
+    assert(exist(libDir, 'dir') > 0, 'Module library not found: %s', libRel);
+
+    typeIndex = local_module_index(libDir);      % module_type -> file path
+
+    paramCfg = struct();
+    paramCfgPath = fullfile(libDir, 'config', 'parameters.yaml');
+    if exist(paramCfgPath, 'file'); paramCfg = read_module_yaml(paramCfgPath); end
+
+    mechCfg = struct();
+    if ~isempty(configYaml)
+        configYaml = local_resolve(configYaml, here);
+        if exist(configYaml, 'file'); mechCfg = read_module_yaml(configYaml); end
+    end
+    mechOv = struct();       % per-instance joint overrides for this mechanism
+    mnf = matlab.lang.makeValidName(mechName);
+    if isfield(mechCfg, mnf) && isstruct(mechCfg.(mnf)); mechOv = mechCfg.(mnf); end
+
+    % --- iterate instances: load defs, inject params, expand internal graph ---
+    assert(isfield(dsl, 'instances') && isstruct(dsl.instances), ...
+        'Mechanism %s declares no instances.', mechName);
+    instNames = fieldnames(dsl.instances);
+    nInst = numel(instNames);
+
+    edges = struct('from', {}, 'to', {}, 'T', {});
+    pendingMap = containers.Map('KeyType', 'char', 'ValueType', 'any');
+    defCache = containers.Map('KeyType', 'char', 'ValueType', 'any');
+
+    inst = struct('name', {}, 'type', {}, 'md', {}, 'bodies', {}, ...
+        'frames', {}, 'joints', {});
+    groundNodes = {};
+
+    for i = 1:nInst
+        iname = instNames{i};
+        itype = dsl.instances.(iname).type;
+
+        if isKey(defCache, itype)
+            md = defCache(itype);
+        else
+            assert(isKey(typeIndex, itype), ...
+                'Instance "%s": module type "%s" not found in library %s.', ...
+                iname, itype, libRel);
+            md = read_module_yaml(typeIndex(itype));
+            defCache(itype) = md;
+        end
+
+        % params = geometric params (by module_type) + joint overrides (by instance)
+        params = struct();
+        tf = matlab.lang.makeValidName(itype);
+        if isfield(paramCfg, tf) && isstruct(paramCfg.(tf)); params = paramCfg.(tf); end
+        inf = matlab.lang.makeValidName(iname);
+        if isfield(mechOv, inf) && isstruct(mechOv.(inf))
+            ov = mechOv.(inf); ofn = fieldnames(ov);
+            for q = 1:numel(ofn); params.(ofn{q}) = ov.(ofn{q}); end
+        end
+
+        pre = [iname '.'];
+
+        % bodies
+        bodies = local_aslist(local_field(md, 'bodies', {}));
+        bList = cell(1, numel(bodies));
+        for k = 1:numel(bodies)
+            b = bodies{k};
+            bList{k} = struct('node', [pre b.name], 'name', b.name, ...
+                'geometry', local_field(b, 'geometry', ''));
+        end
+
+        % frames (record polarity/exposed/tag for mating + rendering)
+        frames = local_aslist(local_field(md, 'frames', {}));
+        fList = cell(1, numel(frames));
+        for k = 1:numel(frames)
+            f = frames{k};
+            node = [pre f.name];
+            fList{k} = struct('node', node, 'name', f.name, ...
+                'exposed', isfield(f, 'exposed') && isequal(f.exposed, true), ...
+                'polarity', local_field(f, 'polarity', ''), ...
+                'semantic_tag', local_field(f, 'semantic_tag', ''), ...
+                'symmetry', local_field(f, 'symmetry', 4));
+            if strcmp(local_field(f, 'semantic_tag', ''), 'ground')
+                groundNodes{end+1} = node; %#ok<AGROW>
+            end
+        end
+
+        % internal fixed-transform edges (bidirectional)
+        fts = local_aslist(local_field(md, 'fixed_transforms', {}));
+        for k = 1:numel(fts)
+            t = fts{k};
+            tr = local_eval_vec(t.translation, params);
+            [R, pend] = local_rot(t.rotation, params);
+            T = local_T(R, tr);
+            fromN = [pre t.from_frame]; toN = [pre t.to_frame];
+            edges(end+1) = struct('from', fromN, 'to', toN, 'T', T); %#ok<AGROW>
+            edges(end+1) = struct('from', toN, 'to', fromN, 'T', local_invT(T)); %#ok<AGROW>
+            if pend; pendingMap(toN) = true; end
+        end
+
+        % internal joint edges (kind-aware, bidirectional)
+        jts = local_aslist(local_field(md, 'joints', {}));
+        jList = cell(1, numel(jts));
+        for k = 1:numel(jts)
+            j = jts{k};
+            ax = local_eval_vec(j.axis, params);
+            val = local_field(params, j.variable, 0);
+            kind = local_field(j, 'kind', 'revolute');
+            T = local_joint_transform(kind, ax, val);
+            fromN = [pre j.from_frame]; toN = [pre j.to_frame];
+            edges(end+1) = struct('from', fromN, 'to', toN, 'T', T); %#ok<AGROW>
+            edges(end+1) = struct('from', toN, 'to', fromN, 'T', local_invT(T)); %#ok<AGROW>
+            jList{k} = struct('node', fromN, 'axis', ax(:) / max(norm(ax), eps), ...
+                'var', j.variable, 'val', val, 'kind', kind);
+        end
+
+        inst(i) = struct('name', iname, 'type', itype, 'md', md, ...
+            'bodies', {bList}, 'frames', {fList}, 'joints', {jList});
+    end
+
+    % --- connections: mate socket->plug, insert bidirectional mate edges ---
+    conns = local_aslist(local_field(dsl, 'connections', {}));
+    connInfo = struct('socketNode', {}, 'plugNode', {}, 'closed', {}, 'label', {});
+    for c = 1:numel(conns)
+        cn = conns{c};
+        assert(isfield(cn, 'ports') && numel(cn.ports) == 2, ...
+            'Connection %d must list exactly two ports.', c);
+        refA = cn.ports{1}; refB = cn.ports{2};
+        [ia, pa] = local_parse_port(refA);
+        [ib, pb] = local_parse_port(refB);
+        fa = local_lookup_frame(inst, ia, pa);
+        fb = local_lookup_frame(inst, ib, pb);
+        assert(~isempty(fa), 'Connection %d: unknown port "%s".', c, refA);
+        assert(~isempty(fb), 'Connection %d: unknown port "%s".', c, refB);
+
+        polA = fa.polarity; polB = fb.polarity;
+        if strcmp(polA, 'socket') && strcmp(polB, 'plug')
+            sk = fa; pl = fb;
+        elseif strcmp(polA, 'plug') && strcmp(polB, 'socket')
+            sk = fb; pl = fa;
+        else
+            error('visualize_mechanism:polarity', ...
+                ['Connection %d [%s ~ %s]: expected one socket + one plug, ' ...
+                 'got "%s" + "%s".'], c, refA, refB, local_tern(isempty(polA), ...
+                 'none', polA), local_tern(isempty(polB), 'none', polB));
+        end
+
+        roll = local_field(cn, 'roll', 0);
+        sym = local_field(sk, 'symmetry', 4);
+        rollAngle = roll * 2 * pi / sym;
+        Tm = local_T(local_rotz(rollAngle) * local_rotx(pi), [0; 0; 0]);
+        isClosed = isequal(local_field(cn, 'closed', false), true);
+
+        % Only spanning-tree (non-chord) mates propagate poses. A chord edge
+        % (closed:true) is the cut of a kinematic loop; using it for
+        % propagation would place a frame through the loop and leave the
+        % closure residual on a tree edge (and make bodies reached from
+        % multiple loops inconsistent). Chords stay diagnostic-only, so their
+        % mate gap correctly reports the loop-closure residual at this config.
+        if ~isClosed
+            edges(end+1) = struct('from', sk.node, 'to', pl.node, 'T', Tm); %#ok<AGROW>
+            edges(end+1) = struct('from', pl.node, 'to', sk.node, 'T', local_invT(Tm)); %#ok<AGROW>
+        end
+
+        connInfo(end+1) = struct('socketNode', sk.node, 'plugNode', pl.node, ...
+            'closed', isClosed, ...
+            'label', sprintf('%s~%s', sk.node, pl.node)); %#ok<AGROW>
+    end
+
+    % --- world root(s) & FK propagation ---
+    seed = containers.Map('KeyType', 'char', 'ValueType', 'any');
+    if ~isempty(groundNodes)
+        for k = 1:numel(groundNodes); seed(groundNodes{k}) = eye(4); end
+    else
+        seed(inst(1).bodies{1}.node) = eye(4);   % first body of first instance
+    end
+    poses = local_propagate_poses(edges, seed);
+
+    % --- characteristic scale ---
+    maxr = 1; ks = keys(poses);
+    for k = 1:numel(ks); P = poses(ks{k}); maxr = max(maxr, norm(P(1:3, 4))); end
+    L = max(4, 0.20 * maxr);
+
+    moduleDir = libDir;
+    repoRoot = fileparts(fileparts(here));
+
+    % --- figure ---
+    fig = figure('Name', sprintf('Mechanism: %s', mechName), 'Color', 'w');
+    ax = axes('Parent', fig); hold(ax, 'on'); grid(ax, 'on'); axis(ax, 'equal');
+    view(ax, 135, 25); xlabel(ax, 'X (mm)'); ylabel(ax, 'Y (mm)'); zlabel(ax, 'Z (mm)');
+    title(ax, sprintf('%s  —  %d instances, %d connections  (X=red Y=green Z=blue)', ...
+        mechName, nInst, numel(conns)), 'Interpreter', 'none');
+
+    local_triad(ax, eye(4), L * 1.4, 2.5, '-');
+    text(ax, 0, 0, 0, '  world', 'FontWeight', 'bold', 'Color', [.2 .2 .2]);
+
+    % --- bodies + frames per instance ---
+    result.mechanism = mechName;
+    result.poses = poses;
+    unplaced = {};
+    fprintf('\n=== mechanism: %s (%d instances, %d connections) ===\n', ...
+        mechName, nInst, numel(conns));
+
+    for i = 1:nInst
+        col = local_type_color(inst(i).type);
+        fprintf('\n-- instance %s [%s] --\n', inst(i).name, inst(i).type);
+
+        for k = 1:numel(inst(i).bodies)
+            b = inst(i).bodies{k};
+            if ~isKey(poses, b.node); unplaced{end+1} = b.node; continue; end %#ok<AGROW>
+            Tb = poses(b.node);
+            geomPath = local_resolve_geometry_path(b.geometry, moduleDir, repoRoot);
+            if ~isempty(b.geometry) && ~isempty(geomPath)
+                geom = local_import_geometry(geomPath);
+                if ~isempty(geom); local_patch_geometry(ax, Tb, geom, col, 0.12); end
+            end
+            local_triad(ax, Tb, L, 1.2, '-');
+        end
+
+        for k = 1:numel(inst(i).frames)
+            f = inst(i).frames{k};
+            if ~isKey(poses, f.node)
+                fprintf('  [UNPLACED] %-22s\n', f.node);
+                unplaced{end+1} = f.node; %#ok<AGROW>
+                continue;
+            end
+            T = poses(f.node);
+            pend = isKey(pendingMap, f.node);
+            if pend
+                fc = [1 0 1]; lw = 2.0; sty = '--'; mk = 'magenta';
+            elseif f.exposed
+                fc = [0 0 0]; lw = 2.0; sty = '-'; mk = 'PORT';
+            else
+                fc = [0.45 0.45 0.45]; lw = 1.0; sty = '--'; mk = 'frame';
+            end
+            local_triad(ax, T, L, lw, sty);
+            plot3(ax, T(1,4), T(2,4), T(3,4), 'o', 'MarkerSize', 5, ...
+                'MarkerFaceColor', fc, 'MarkerEdgeColor', fc);
+            lbl = f.node; if pend; lbl = [lbl ' (pending R)']; end %#ok<AGROW>
+            text(ax, T(1,4), T(2,4), T(3,4), ['  ' lbl], 'Color', fc, ...
+                'FontWeight', local_tern(f.exposed, 'bold', 'normal'), ...
+                'Interpreter', 'none', 'FontSize', 8);
+            fprintf('  %-7s %-22s pos=[% 7.2f % 7.2f % 7.2f]  +Z=[% .2f % .2f % .2f]%s\n', ...
+                mk, f.node, T(1,4), T(2,4), T(3,4), T(1,3), T(2,3), T(3,3), ...
+                local_tern(pend, '  <pending>', ''));
+        end
+
+        % joint axes
+        for k = 1:numel(inst(i).joints)
+            j = inst(i).joints{k};
+            if ~isKey(poses, j.node); continue; end
+            P = poses(j.node);
+            o = P(1:3, 4); d = P(1:3, 1:3) * j.axis;
+            if strcmpi(j.kind, 'prismatic'); jc = [0.1 0.1 0.9]; else; jc = [0.9 0.1 0.1]; end
+            p1 = o - d * L * 1.3; p2 = o + d * L * 1.3;
+            line(ax, [p1(1) p2(1)], [p1(2) p2(2)], [p1(3) p2(3)], ...
+                'Color', jc, 'LineWidth', 2.5, 'LineStyle', ':');
+            text(ax, p2(1), p2(2), p2(3), sprintf('  %s.%s=%.3g', ...
+                inst(i).name, j.var, j.val), 'Color', jc, 'FontSize', 8, ...
+                'Interpreter', 'none');
+        end
+    end
+
+    % --- mate diagnostics: segment between paired port origins ---
+    fprintf('\n-- mate checks --\n');
+    for c = 1:numel(connInfo)
+        ci = connInfo(c);
+        if ~isKey(poses, ci.socketNode) || ~isKey(poses, ci.plugNode)
+            fprintf('  [UNPLACED MATE] %s\n', ci.label); continue;
+        end
+        Ps = poses(ci.socketNode); Pp = poses(ci.plugNode);
+        gap = norm(Ps(1:3,4) - Pp(1:3,4));
+        zdot = dot(Ps(1:3,3), Pp(1:3,3));   % +Z should be anti-parallel (-1)
+        if ci.closed; lc = [0.95 0.55 0.10]; lw = 3.0; else; lc = [0.2 0.2 0.2]; lw = 1.5; end
+        line(ax, [Ps(1,4) Pp(1,4)], [Ps(2,4) Pp(2,4)], [Ps(3,4) Pp(3,4)], ...
+            'Color', lc, 'LineWidth', lw, 'LineStyle', '--');
+        fprintf('  %-40s gap=%.3e  Zdot=% .4f%s\n', ci.label, gap, zdot, ...
+            local_tern(ci.closed, '  [closed]', ''));
+    end
+
+    if ~isempty(unplaced)
+        fprintf('\n  [WARNING] %d node(s) not placed (disconnected component?).\n', ...
+            numel(unplaced));
+    end
+    result.unplaced = unplaced;
+
+    rotate3d(ax, 'on');
+end
+
+%% ---- mechanism-orchestration local functions (shared math lives in private/) ----
+
+%% index the module library: module_type -> definition file path
+function idx = local_module_index(libDir)
+    idx = containers.Map('KeyType', 'char', 'ValueType', 'char');
+    files = dir(fullfile(libDir, '*.yaml'));
+    for i = 1:numel(files)
+        fp = fullfile(libDir, files(i).name);
+        try
+            md = read_module_yaml(fp);
+        catch
+            continue;
+        end
+        if isstruct(md) && isfield(md, 'module_type')
+            idx(md.module_type) = fp;
+        end
+    end
+end
+
+%% split an "instance.port" reference into its two parts (port may lack a dot only if malformed)
+function [instName, portName] = local_parse_port(ref)
+    d = strfind(ref, '.');
+    assert(~isempty(d), 'Malformed port reference "%s" (expected instance.port).', ref);
+    instName = ref(1:d(1)-1);
+    portName = ref(d(1)+1:end);
+end
+
+%% find the recorded frame struct for instance/port; [] if absent
+function f = local_lookup_frame(inst, instName, portName)
+    f = [];
+    for i = 1:numel(inst)
+        if ~strcmp(inst(i).name, instName); continue; end
+        for k = 1:numel(inst(i).frames)
+            if strcmp(inst(i).frames{k}.name, portName); f = inst(i).frames{k}; return; end
+        end
+    end
+end
+
+%% inverse of a homogeneous (rigid) transform
+function Ti = local_invT(T)
+    R = T(1:3,1:3); t = T(1:3,4);
+    Ti = eye(4); Ti(1:3,1:3) = R'; Ti(1:3,4) = -R' * t;
+end
+
+%% color per module type (RGB)
+function c = local_type_color(type)
+    switch type
+        case 'Frame';        c = [0.30 0.55 0.85];
+        case 'Joint';        c = [0.85 0.45 0.25];
+        case 'ToolPipette'; c = [0.35 0.70 0.40];
+        case 'Manipulator';  c = [0.60 0.40 0.75];
+        case 'Adaptor';      c = [0.75 0.65 0.25];
+        case 'Pin';          c = [0.50 0.50 0.50];
+        otherwise;           c = [0.45 0.45 0.45];
+    end
+end
