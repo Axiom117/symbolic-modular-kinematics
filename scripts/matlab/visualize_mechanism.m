@@ -26,7 +26,7 @@ function result = visualize_mechanism(dslYaml, configYaml)
 %     visualize_mechanism('../../specs/dsl/examples/open-chain-2r.yaml', ...
 %                         'mechanism_viz_config.yaml')
 %
-%   Shared primitives (rotation/geometry/FK) live in scripts/matlab/private/
+%   Shared primitives (rotation/geometry/FK) live in scripts/matlab/+smk/
 %   and are reused verbatim from visualize_module.m. Mate convention follows
 %   specs/modeling-conventions.md and specs/dsl/connection-semantics.md:
 %     T_plug<-socket = Rz(roll*2*pi/symmetry) * Rx(pi),  t = 0.
@@ -39,20 +39,20 @@ function result = visualize_mechanism(dslYaml, configYaml)
     if nargin < 2; configYaml = ''; end
 
     here = fileparts(mfilename('fullpath'));
-    dslYaml = local_resolve(dslYaml, here);
+    dslYaml = smk.PathUtils.resolve(dslYaml, here);
     assert(exist(dslYaml, 'file') > 0, 'DSL file not found: %s', dslYaml);
 
     dsl = read_module_yaml(dslYaml);
     assert(isfield(dsl, 'mechanism'), 'Not a mechanism assembly: %s', dslYaml);
-    ver = local_field(dsl, 'dsl_version', 0);
+    ver = smk.CommonUtils.field(dsl, 'dsl_version', 0);
     assert(isequal(ver, 0), 'Unsupported dsl_version %s (expected 0).', num2str(ver));
 
     mechName = dsl.mechanism;
     dslDir = fileparts(dslYaml);
 
     % --- module library + parameter config ---
-    libRel = local_field(dsl, 'module_library', '../../modules/');
-    libDir = local_resolve(libRel, dslDir);
+    libRel = smk.CommonUtils.field(dsl, 'module_library', '../../modules/');
+    libDir = smk.PathUtils.resolve(libRel, dslDir);
     assert(exist(libDir, 'dir') > 0, 'Module library not found: %s', libRel);
 
     typeIndex = local_module_index(libDir);      % module_type -> file path
@@ -63,7 +63,7 @@ function result = visualize_mechanism(dslYaml, configYaml)
 
     mechCfg = struct();
     if ~isempty(configYaml)
-        configYaml = local_resolve(configYaml, here);
+        configYaml = smk.PathUtils.resolve(configYaml, here);
         if exist(configYaml, 'file'); mechCfg = read_module_yaml(configYaml); end
     end
     mechOv = struct();       % per-instance joint overrides for this mechanism
@@ -111,37 +111,37 @@ function result = visualize_mechanism(dslYaml, configYaml)
         pre = [iname '.'];
 
         % bodies
-        bodies = local_aslist(local_field(md, 'bodies', {}));
+        bodies = smk.CommonUtils.aslist(smk.CommonUtils.field(md, 'bodies', {}));
         bList = cell(1, numel(bodies));
         for k = 1:numel(bodies)
             b = bodies{k};
             bList{k} = struct('node', [pre b.name], 'name', b.name, ...
-                'geometry', local_field(b, 'geometry', ''));
+                'geometry', smk.CommonUtils.field(b, 'geometry', ''));
         end
 
         % frames (record polarity/exposed/tag for mating + rendering)
-        frames = local_aslist(local_field(md, 'frames', {}));
+        frames = smk.CommonUtils.aslist(smk.CommonUtils.field(md, 'frames', {}));
         fList = cell(1, numel(frames));
         for k = 1:numel(frames)
             f = frames{k};
             node = [pre f.name];
             fList{k} = struct('node', node, 'name', f.name, ...
                 'exposed', isfield(f, 'exposed') && isequal(f.exposed, true), ...
-                'polarity', local_field(f, 'polarity', ''), ...
-                'semantic_tag', local_field(f, 'semantic_tag', ''), ...
-                'symmetry', local_field(f, 'symmetry', 4));
-            if strcmp(local_field(f, 'semantic_tag', ''), 'ground')
+                'polarity', smk.CommonUtils.field(f, 'polarity', ''), ...
+                'semantic_tag', smk.CommonUtils.field(f, 'semantic_tag', ''), ...
+                'symmetry', smk.CommonUtils.field(f, 'symmetry', 4));
+            if strcmp(smk.CommonUtils.field(f, 'semantic_tag', ''), 'ground')
                 groundNodes{end+1} = node; %#ok<AGROW>
             end
         end
 
         % internal fixed-transform edges (bidirectional)
-        fts = local_aslist(local_field(md, 'fixed_transforms', {}));
+        fts = smk.CommonUtils.aslist(smk.CommonUtils.field(md, 'fixed_transforms', {}));
         for k = 1:numel(fts)
             t = fts{k};
-            tr = local_eval_vec(t.translation, params);
-            [R, pend] = local_rot(t.rotation, params);
-            T = local_T(R, tr);
+            tr = smk.CommonUtils.eval_vec(t.translation, params);
+            [R, pend] = smk.RigidBodyMath.rot(t.rotation, params);
+            T = smk.RigidBodyMath.T(R, tr);
             fromN = [pre t.from_frame]; toN = [pre t.to_frame];
             edges(end+1) = struct('from', fromN, 'to', toN, 'T', T); %#ok<AGROW>
             edges(end+1) = struct('from', toN, 'to', fromN, 'T', local_invT(T)); %#ok<AGROW>
@@ -149,14 +149,14 @@ function result = visualize_mechanism(dslYaml, configYaml)
         end
 
         % internal joint edges (kind-aware, bidirectional)
-        jts = local_aslist(local_field(md, 'joints', {}));
+        jts = smk.CommonUtils.aslist(smk.CommonUtils.field(md, 'joints', {}));
         jList = cell(1, numel(jts));
         for k = 1:numel(jts)
             j = jts{k};
-            ax = local_eval_vec(j.axis, params);
-            val = local_field(params, j.variable, 0);
-            kind = local_field(j, 'kind', 'revolute');
-            T = local_joint_transform(kind, ax, val);
+            ax = smk.CommonUtils.eval_vec(j.axis, params);
+            val = smk.CommonUtils.field(params, j.variable, 0);
+            kind = smk.CommonUtils.field(j, 'kind', 'revolute');
+            T = smk.PoseGraph.joint_transform(kind, ax, val);
             fromN = [pre j.from_frame]; toN = [pre j.to_frame];
             edges(end+1) = struct('from', fromN, 'to', toN, 'T', T); %#ok<AGROW>
             edges(end+1) = struct('from', toN, 'to', fromN, 'T', local_invT(T)); %#ok<AGROW>
@@ -169,7 +169,7 @@ function result = visualize_mechanism(dslYaml, configYaml)
     end
 
     % --- connections: mate socket->plug, insert bidirectional mate edges ---
-    conns = local_aslist(local_field(dsl, 'connections', {}));
+    conns = smk.CommonUtils.aslist(smk.CommonUtils.field(dsl, 'connections', {}));
     connInfo = struct('socketNode', {}, 'plugNode', {}, 'closed', {}, 'label', {});
     for c = 1:numel(conns)
         cn = conns{c};
@@ -191,15 +191,15 @@ function result = visualize_mechanism(dslYaml, configYaml)
         else
             error('visualize_mechanism:polarity', ...
                 ['Connection %d [%s ~ %s]: expected one socket + one plug, ' ...
-                 'got "%s" + "%s".'], c, refA, refB, local_tern(isempty(polA), ...
-                 'none', polA), local_tern(isempty(polB), 'none', polB));
+                 'got "%s" + "%s".'], c, refA, refB, smk.CommonUtils.tern(isempty(polA), ...
+                 'none', polA), smk.CommonUtils.tern(isempty(polB), 'none', polB));
         end
 
-        roll = local_field(cn, 'roll', 0);
-        sym = local_field(sk, 'symmetry', 4);
+        roll = smk.CommonUtils.field(cn, 'roll', 0);
+        sym = smk.CommonUtils.field(sk, 'symmetry', 4);
         rollAngle = roll * 2 * pi / sym;
-        Tm = local_T(local_rotz(rollAngle) * local_rotx(pi), [0; 0; 0]);
-        isClosed = isequal(local_field(cn, 'closed', false), true);
+        Tm = smk.RigidBodyMath.T(smk.RigidBodyMath.rotz(rollAngle) * smk.RigidBodyMath.rotx(pi), [0; 0; 0]);
+        isClosed = isequal(smk.CommonUtils.field(cn, 'closed', false), true);
 
         % Only spanning-tree (non-chord) mates propagate poses. A chord edge
         % (closed:true) is the cut of a kinematic loop; using it for
@@ -224,7 +224,7 @@ function result = visualize_mechanism(dslYaml, configYaml)
     else
         seed(inst(1).bodies{1}.node) = eye(4);   % first body of first instance
     end
-    poses = local_propagate_poses(edges, seed);
+    poses = smk.PoseGraph.propagate_poses(edges, seed);
 
     % --- characteristic scale ---
     maxr = 1; ks = keys(poses);
@@ -241,7 +241,7 @@ function result = visualize_mechanism(dslYaml, configYaml)
     title(ax, sprintf('%s  —  %d instances, %d connections  (X=red Y=green Z=blue)', ...
         mechName, nInst, numel(conns)), 'Interpreter', 'none');
 
-    local_triad(ax, eye(4), L * 1.4, 2.5, '-');
+    smk.VizHelpers.triad(ax, eye(4), L * 1.4, 2.5, '-');
     text(ax, 0, 0, 0, '  world', 'FontWeight', 'bold', 'Color', [.2 .2 .2]);
 
     % --- bodies + frames per instance ---
@@ -252,19 +252,19 @@ function result = visualize_mechanism(dslYaml, configYaml)
         mechName, nInst, numel(conns));
 
     for i = 1:nInst
-        col = local_type_color(inst(i).type);
+        col = smk.VizHelpers.type_color(inst(i).type);
         fprintf('\n-- instance %s [%s] --\n', inst(i).name, inst(i).type);
 
         for k = 1:numel(inst(i).bodies)
             b = inst(i).bodies{k};
             if ~isKey(poses, b.node); unplaced{end+1} = b.node; continue; end %#ok<AGROW>
             Tb = poses(b.node);
-            geomPath = local_resolve_geometry_path(b.geometry, moduleDir, repoRoot);
+            geomPath = smk.PathUtils.resolve_geometry_path(b.geometry, moduleDir, repoRoot);
             if ~isempty(b.geometry) && ~isempty(geomPath)
-                geom = local_import_geometry(geomPath);
-                if ~isempty(geom); local_patch_geometry(ax, Tb, geom, col, 0.12); end
+                geom = smk.VizHelpers.import_geometry(geomPath);
+                if ~isempty(geom); smk.VizHelpers.patch_geometry(ax, Tb, geom, col, 0.12); end
             end
-            local_triad(ax, Tb, L, 1.2, '-');
+            smk.VizHelpers.triad(ax, Tb, L, 1.2, '-');
         end
 
         for k = 1:numel(inst(i).frames)
@@ -283,16 +283,16 @@ function result = visualize_mechanism(dslYaml, configYaml)
             else
                 fc = [0.45 0.45 0.45]; lw = 1.0; sty = '--'; mk = 'frame';
             end
-            local_triad(ax, T, L, lw, sty);
+            smk.VizHelpers.triad(ax, T, L, lw, sty);
             plot3(ax, T(1,4), T(2,4), T(3,4), 'o', 'MarkerSize', 5, ...
                 'MarkerFaceColor', fc, 'MarkerEdgeColor', fc);
             lbl = f.node; if pend; lbl = [lbl ' (pending R)']; end %#ok<AGROW>
             text(ax, T(1,4), T(2,4), T(3,4), ['  ' lbl], 'Color', fc, ...
-                'FontWeight', local_tern(f.exposed, 'bold', 'normal'), ...
+                'FontWeight', smk.CommonUtils.tern(f.exposed, 'bold', 'normal'), ...
                 'Interpreter', 'none', 'FontSize', 8);
             fprintf('  %-7s %-22s pos=[% 7.2f % 7.2f % 7.2f]  +Z=[% .2f % .2f % .2f]%s\n', ...
                 mk, f.node, T(1,4), T(2,4), T(3,4), T(1,3), T(2,3), T(3,3), ...
-                local_tern(pend, '  <pending>', ''));
+                smk.CommonUtils.tern(pend, '  <pending>', ''));
         end
 
         % joint axes
@@ -325,7 +325,7 @@ function result = visualize_mechanism(dslYaml, configYaml)
         line(ax, [Ps(1,4) Pp(1,4)], [Ps(2,4) Pp(2,4)], [Ps(3,4) Pp(3,4)], ...
             'Color', lc, 'LineWidth', lw, 'LineStyle', '--');
         fprintf('  %-40s gap=%.3e  Zdot=% .4f%s\n', ci.label, gap, zdot, ...
-            local_tern(ci.closed, '  [closed]', ''));
+            smk.CommonUtils.tern(ci.closed, '  [closed]', ''));
     end
 
     if ~isempty(unplaced)
@@ -337,7 +337,7 @@ function result = visualize_mechanism(dslYaml, configYaml)
     rotate3d(ax, 'on');
 end
 
-%% ---- mechanism-orchestration local functions (shared math lives in private/) ----
+%% ---- mechanism-orchestration local functions (shared math lives in +smk/) ----
 
 %% index the module library: module_type -> definition file path
 function idx = local_module_index(libDir)
@@ -381,15 +381,4 @@ function Ti = local_invT(T)
     Ti = eye(4); Ti(1:3,1:3) = R'; Ti(1:3,4) = -R' * t;
 end
 
-%% color per module type (RGB)
-function c = local_type_color(type)
-    switch type
-        case 'Frame';        c = [0.30 0.55 0.85];
-        case 'Joint';        c = [0.85 0.45 0.25];
-        case 'ToolPipette'; c = [0.35 0.70 0.40];
-        case 'Manipulator';  c = [0.60 0.40 0.75];
-        case 'Adaptor';      c = [0.75 0.65 0.25];
-        case 'Pin';          c = [0.50 0.50 0.50];
-        otherwise;           c = [0.45 0.45 0.45];
-    end
-end
+
