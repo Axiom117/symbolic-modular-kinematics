@@ -52,10 +52,6 @@ $defs:
     type: string
     pattern: "^[A-Z][A-Za-z0-9_]*$"
 
-  scalarOrExpr:
-    description: 实例参数值——数值或保留的符号表达式（如 cubeLength/2）；v0 禁止跨实例引用。
-    type: [number, string]
-
   portRef:
     description: >-
       端口引用 "<instance>.<port>"。instance 为 lowerCamelCase/snake_case，
@@ -64,7 +60,7 @@ $defs:
     pattern: "^[a-z][a-zA-Z0-9_]*\\.(face[XYZ][+-]|[a-zA-Z][a-zA-Z0-9_]*)$"
 
   instance:
-    description: 单个模块实例声明。
+    description: 单个模块实例声明。v0 仅含 type，参数值由 specs/modules/config/parameters.yaml 注入。
     type: object
     additionalProperties: false
     required:
@@ -72,11 +68,6 @@ $defs:
     properties:
       type:
         $ref: "#/$defs/moduleType"
-      parameters:
-        description: 实例参数赋值（对模块类参数）。v0 仅允许独立字面量，禁止跨实例引用。
-        type: object
-        additionalProperties:
-          $ref: "#/$defs/scalarOrExpr"
 
   connection:
     description: 单条端口连接。ports 顺序无关；父/子由极性推断（见 connection-semantics.md §2.2）。

@@ -75,6 +75,11 @@
 
 该外部驱动器由 `Manipulator` 关节模块物化（见 §5.6）：其 XYZ 三轴平移由内部三个 `prismatic` 关节（变量 `dx`/`dy`/`dz`）串联组合而成，等价于一个 3-DOF 笛卡尔关节。机构侧以 `socket` 端口 `dock` 对接 `Adaptor.mount_point`（`plug`），世界侧以 `ground` frame（无 `polarity`）由执行层绑定到 `world`；上文的静态零位偏移即写入 `Manipulator` 的接地配置。`Manipulator` 是 L1 模块，但物化了 L3 外部驱动：其关节在闭环构型下作为待求未知量，在开环构型下作为 `actuated` 输入（见下）。
 
+> **L2 内部闭环 vs L3 世界系闭环**：上述 M-REx 主构型属于 **L3 世界系闭环**——回路因多个 `ground` frame
+> 绑定到同一 `world` 原点而形成，DSL 中机构本体为开环链（不写 `closed: true`），切口由 L3 `closure_cuts`
+> 声明。L2 内部闭环（如四杆环）则在 DSL 中用 `closed: true` 标记端口间补边，用于验证回路识别逻辑。
+> 两种闭环的残差公式一致，详细对比见 `specs/dsl/connection-semantics.md` §6.4。
+
 **开环驱动（测试构型）**
 
 若关节自身可驱动（`actuated`，在执行层指派），则无需外部驱动器：直接驱动关节即可让机构形成开环串联构型，例如 3R 运动链。此时执行层只需世界系一个根加各驱动关节输入，解释器直接输出从世界系到末端的正运动学表达式，无闭环残差。
@@ -242,7 +247,7 @@ DSL 源码与解释器 IR 中，元件类型名与模块类型名遵循不同的
 | `Frame` | 结构（0 DOF） | `cubeLength` | `faceX+`、`faceX-`、`faceY+`、`faceY-`、`faceZ+`、`faceZ-` | 六面均 `socket` | `frame_hyper_cube.STEP` |
 | `Pin` | 结构（0 DOF） | 无 | `sideA`、`sideB` | 两端均 `plug` | `connector_dowel_pin.step` |
 | `Joint` | 运动（1 DOF revolute） | 无 | `linkA`、`linkB` | 两端均 `plug` | `linkage_hinge_joint.STEP` |
-| `Adaptor` | 结构（0 DOF） | 无 | `attachment_point`、`dock` | 两端均 `plug` | `adaptor_45.STEP` |
+| `Adaptor` | 结构（0 DOF） | 无 | `attachment_point`、`pin_connector` | 两端均 `plug` | `adaptor_45.STEP` |
 | `Pipette_body` | 结构（0 DOF） | `tipDistance` | `connector_side`、`tip_origin` | `connector_side` 为 `plug`；`tip_origin` 无极性（任务系） | `tool.STEP` |
 | `Manipulator` | 运动（3 DOF 笛卡尔） | 无 | `dock`、`ground` | `dock` 为 `socket`；`ground` 无极性（接地系） | 无（外部驱动器无库几何） |
 
@@ -284,7 +289,7 @@ linkA ←fixedTransform— bodyA —[joint: revolute(q)]— bodyB —fixedTransf
 
 ### 5.4 Adaptor（坐标适配件）
 
-内部结构：1 个 `body`，两条支路各含若干串联 `fixedTransform`（`attachment_point` 侧经 `rectify → align_axis` 两级重定向；`dock` 侧直接派生）。完整变换待 A.1 从 SLX 精确提取。
+内部结构：1 个 `body`，两条支路各含若干串联 `fixedTransform`（`attachment_point` 侧经 `rectify → align_axis` 两级重定向；`pin_connector` 侧直接派生）。完整变换待 A.1 从 SLX 精确提取。
 
 ### 5.5 Pipette_body（工具末端件）
 

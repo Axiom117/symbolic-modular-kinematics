@@ -17,7 +17,7 @@
 | S3 | `mechanism` 符合 `^[a-zA-Z][a-zA-Z0-9_]*$` | `$defs.mechanismName.pattern` |
 | S4 | `instances` 至少一个，键符合实例名正则 | `minProperties: 1` + `propertyNames` |
 | S5 | 每个实例含 `type`，`type` 符合 UpperCamelCase 正则，无多余键 | `instance.required` + `moduleType.pattern` + `additionalProperties: false` |
-| S6 | 实例 `parameters` 值为数值或字符串 | `scalarOrExpr` |
+| S6 | 实例 `parameters` 块不出现在 v0 DSL 中（v0 禁止 variant，参数值由 `specs/modules/config/parameters.yaml` 按 module_type 注入） | `instance.additionalProperties: false` + 无 `parameters` |
 | S7 | 每条连接含 `ports`，恰 2 元素，符合端口引用正则 | `connection.required` + `ports.minItems/maxItems` + `portRef.pattern` |
 | S8 | `roll` 为非负整数 | `integer` + `minimum: 0` |
 | S9 | `closed` 为布尔 | `type: boolean` |

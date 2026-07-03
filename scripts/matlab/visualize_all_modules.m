@@ -7,7 +7,7 @@ function visualize_all_modules(configYaml)
 %   so the whole L1 library can be checked in a single call.
 
     if nargin < 1 || isempty(configYaml)
-        configYaml = 'module_viz_config.yaml';
+        configYaml = 'specs/modules/config/parameters.yaml';
     end
     here = fileparts(mfilename('fullpath'));
     modDir = fullfile(here, '..', '..', 'specs', 'modules');

@@ -32,23 +32,15 @@ module_library: ../../modules/
 instances:
   baseHub:
     type: Frame
-    parameters:
-      cubeLength: 20
   platformHub:
     type: Frame
-    parameters:
-      cubeLength: 20
   pipette:
     type: Pipette_body
-    parameters:
-      tipDistance: 25
   # 支链 1
   j1a:
     type: Joint
   link1:
     type: Frame
-    parameters:
-      cubeLength: 10
   j1b:
     type: Joint
   # 支链 2
@@ -56,8 +48,6 @@ instances:
     type: Joint
   link2:
     type: Frame
-    parameters:
-      cubeLength: 10
   j2b:
     type: Joint
   # 支链 3
@@ -65,8 +55,6 @@ instances:
     type: Joint
   link3:
     type: Frame
-    parameters:
-      cubeLength: 10
   j3b:
     type: Joint
 

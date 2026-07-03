@@ -125,7 +125,7 @@ $defs:
             const: true
 
   parameter:
-    description: 模块类作用域参数（module-class scope，§11）；不在此处取值。
+    description: 模块类作用域参数（module-class scope，§11）；参数声明，取值由外部 config 注入。
     type: object
     additionalProperties: false
     required: [name]

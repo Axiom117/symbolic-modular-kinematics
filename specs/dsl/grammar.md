@@ -124,13 +124,15 @@ instances:
 
 ### 4.4 实例参数规则（v0）
 
-- `parameters` 仅对模块声明了的**模块类参数**赋值（如 `Frame.cubeLength`、`Pipette_body.tipDistance`）。
-- v0 参数值仅允许**独立字面量**：
-  - 数值（`10`、`3.5`、`-2`）
-  - 保留符号形式的简单表达式字符串（`"cubeLength/2"`、`"-tipDistance"`）——沿用模块定义阶段约定，A.2 不强制数值化。
-- **v0 禁止跨实例引用**：不允许 `frame2.cubeLength = frame1.cubeLength * 2` 这类形式，
-  即参数值中不得出现对其他实例名或其参数的引用。跨实例依赖留待后续版本。
-- 未在 `parameters` 中给出的模块参数，其取值策略由 A.3 解释器与 L3 配置决定；DSL 层不填充默认值。
+- 模块类参数（如 `Frame.cubeLength`、`Pipette_body.tipDistance`）在 **L1 模块定义**
+  中**声明**（`name`/`unit`/`description`），但**取值**由独立配置文件
+  `specs/modules/config/parameters.yaml` 注入——该文件按 `module_type` 映射参数名到具体数值。
+  解释器在加载模块库时读取此配置，将参数值注入模块类。
+- **v0 禁止 variant**：同一模块类型的所有实例**参数完全相同**（与 Simulink 库块建模一致）。
+  因此 DSL 实例声明**不写 `parameters` 块**；所有同类型实例统一继承 `config/parameters.yaml` 中的取值。
+- **v0 禁止跨实例引用**：参数值中不得出现对其他实例名或其参数的引用。
+  跨实例依赖留待后续版本。
+- 未在 `config/parameters.yaml` 中配置的模块参数，其取值策略由 A.3 解释器与 L3 配置决定。
 - 角度类参数若出现，必须显式标注单位（`modeling-conventions.md` §7），如 `"30 deg"`。
 
 ### 4.5 实例声明示例
@@ -139,14 +141,10 @@ instances:
 instances:
   frame0:
     type: Frame
-    parameters:
-      cubeLength: 10
   joint1:
     type: Joint          # 无实例参数
   pipette:
     type: Pipette_body
-    parameters:
-      tipDistance: 25
 ```
 
 ---
@@ -215,10 +213,14 @@ connections:
 
 ### 5.7 闭环归属：L2 vs L3
 
-| 回路类型 | 何时闭合 | 声明位置 |
-|------|------|------|
-| L2 机构内闭环 | 模块实例按连接成环（如四杆环） | DSL 连接级 `closed: true` |
-| L3 世界系闭环 | L3 绑定 `world` 与外部驱动后才成环（M-REx 主构型） | L3 execution-config `closure_cuts` |
+| 回路类型 | 何时闭合 | 声明位置 | 主要用途 |
+|------|------|------|------|
+| L2 机构内闭环 | 模块实例按连接成环（如四杆环） | DSL 连接级 `closed: true` | 验证回路识别与约束构造逻辑 |
+| L3 世界系闭环 | L3 绑定 `world` 与外部驱动后才成环（M-REx 主构型） | L3 execution-config `closure_cuts` | **当前主导部署模式** |
+
+**M-REx 世界系闭环**是绝大多数模块化 M-REx 配置采用的真实模式。机构本体在 DSL 中描述为开环链
+（不写任何 `closed: true`），挂载到多台 `Manipulator` 上。每台 `Manipulator` 的 `ground` frame
+在 L3 绑定到同一 `world` 原点，回路因此闭合。详细语义见 `connection-semantics.md` §6.4。
 
 ### 5.8 连接声明示例
 

@@ -33,20 +33,12 @@ module_library: ../../modules/
 instances:
   frameA:
     type: Frame
-    parameters:
-      cubeLength: 10
   frameB:
     type: Frame
-    parameters:
-      cubeLength: 10
   frameC:
     type: Frame
-    parameters:
-      cubeLength: 10
   frameD:
     type: Frame
-    parameters:
-      cubeLength: 10
   jointAB:
     type: Joint
   jointBC:

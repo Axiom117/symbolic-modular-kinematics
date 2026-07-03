@@ -7,7 +7,7 @@
 # （EndFrame 候选）。两端口平移已知；参考摘要未给出朝向（无 align 规则），
 # 故旋转以 pending 占位，extraction_status 为 partial。
 
-module_type: Pipette_body
+module_type: ToolPipette
 category: structural
 dof: 0
 geometry: assets/tool.STEP

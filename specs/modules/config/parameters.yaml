@@ -1,0 +1,14 @@
+# 模块参数配置（阶段 A.1）
+# 所有同类型模块实例共享同一组参数值（v0 禁止 variant）。
+# 解释器在加载模块定义后，从此文件读取参数取值并注入到模块类。
+#
+# 键 = module_type（与模块定义文件中的 module_type 字段一致）
+# 值 = 该模块所有参数的取值映射。参数名须与模块定义中 parameters[].name 匹配。
+#
+# 无参数的模块（如 Joint、Pin、Adaptor、Manipulator）不出现在本文件中。
+
+Frame:
+  cubeLength: 10
+
+ToolPipette:
+  tipDistance: 30

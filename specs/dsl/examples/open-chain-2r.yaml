@@ -29,24 +29,16 @@ module_library: ../../modules/
 instances:
   frame0:
     type: Frame
-    parameters:
-      cubeLength: 10
   joint1:
     type: Joint
   frame1:
     type: Frame
-    parameters:
-      cubeLength: 10
   joint2:
     type: Joint
   frame2:
     type: Frame
-    parameters:
-      cubeLength: 10
   pipette:
     type: Pipette_body
-    parameters:
-      tipDistance: 25
 
 connections:
   # 第一段：frame0(socket) — joint1(plug)
