@@ -22,10 +22,10 @@ naming:
 element_types:
   nodes:
     body: { dof: 0, geometry_host: true, center_frame: true, fields: [name, geometry?] }
-    frame: { dof: 0, host: body, fields: [name, host, exposed?, semantic_tag?, polarity?, symmetry?] }   # Port = exposed:true; 位姿由 fixedTransform 给出
+    frame: { dof: 0, host: body, fields: [name, host, exposed?, semantic_tag?, polarity?, symmetry?, observable?] }   # Port = exposed:true; 位姿由 fixedTransform 给出；observable 标记是否纳入解释器输出
   edges:
     fixedTransform: { dof: 0, fields: [from_frame, to_frame, translation, rotation] }
-    joint: { dof_min: 1, kinds: [revolute, prismatic], fields: [from_frame, to_frame, kind, axis, variable, limit?] }  # actuated 在执行层指派，非模块字段
+    joint: { dof_min: 1, kinds: [revolute, prismatic], fields: [from_frame, to_frame, kind, axis, variable, limit?, observable?] }  # actuated 在执行层指派，非模块字段；observable 标记变量值是否纳入解释器输出
     constraint: { generated_phase: A4, in_module_def: false, fields: [frame_pair, components] }
 
 coordinate_system:
@@ -56,9 +56,9 @@ port:
   semantic_tag_affects_kinematics: false
   name_pattern: '^(face[XYZ][+-]|[a-zA-Z][a-zA-Z0-9_]*)$'
   unique_per_module: true
-  semantic_tags: [connector, joint_side, tool, dock]
+  semantic_tags: [connector, joint_side, tool, dock, ground]   # ground = world 侧接地 frame（Manipulator，无 polarity，由 L3 绑定 world）
   mating_normal: +Z_outward    # 所有 port 的 +Z 统一为朝模块外的对插法向（§9.1）
-  polarity_values: [socket, plug]   # socket = Frame 凹面钢片（唯一）；plug = 贴到 Frame 上的凸面磁铁
+  polarity_values: [socket, plug]   # socket = 凹面钢片（Frame 六面 + Manipulator 驱动口）；plug = 贴到 socket 上的凸面磁铁
   polarity_optional: true      # 任务/工具参考系（如 tip_origin）不带 polarity，不参与机械连接
   default_symmetry: 4          # 绕 +Z 的旋转对称阶；缺省 4（方钢片 C4），约束连接 roll 离散取值
 
@@ -83,8 +83,17 @@ allow_symbolic_expressions: true
 # 执行层（L3）：把机构本体接入世界系与驱动源，闭合成可求解系统
 execution:
   configurations: [closed_loop, open_loop]
+  # 变量注册与分区（见 modeling-conventions.md §3.6）：
+  #   A.3 IR 展开时收集所有 observable frame/joint → variableRegistry
+  #   用户在 execution config 中将 registry 分区为 known（已知输入）/ unknown（待求输出）
+  #   分区决定求解方向：FK = known:actuated, unknown:endFrame；IK = known:endFrame, unknown:actuated
+  variable_registry:
+    source: observable          # registry 来源：frame.observable:true + joint.observable:true
+    partition: [known, unknown] # 用户分区；不内置 FK/IK mode
   closed_loop:
-    drivers: external          # 外部驱动器提供多自由度力旋量（wrench）
+    drivers: external          # 外部驱动器提供多自由度驱动；由 Manipulator 模块物化（§2.4、§5.6）
+    driver_module: Manipulator # 外部驱动 = Manipulator 关节模块（3-DOF 笛卡尔 = 三个 prismatic）
+    world_binding: manipulator_ground_frame   # L3 把 Manipulator.ground(无 polarity) 绑定到 world
     loop: [world, external_driver, mechanism, external_driver, world]
     closure_criteria: relative_pose_residual   # 回路切口的相对位姿误差分量
     output: ik_residual

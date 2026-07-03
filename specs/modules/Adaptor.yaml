@@ -5,7 +5,7 @@
 #
 # 适配模块：dock 侧直接派生；attachment_point 侧经 rectify → align_axis 两级重定向。
 # 内部链结构已知，但各级变换精确数值在参考摘要中标注「待 A.1 从 SLX 精确提取」。
-# 当前 SLX 二进制不在工作区，全部变换以 pending/provisional 占位，extraction_status 为 partial。
+# 当前 SLX 二进制不在工作区，全部变换以 pending 占位，extraction_status 为 partial。
 #
 # 拓扑：
 #   body —fixedTransform(rectify)→ rectify —fixedTransform(align_axis)→ align_axis —→ attachment_point
@@ -23,9 +23,9 @@ bodies:
   - name: body
     geometry: assets/adaptor_45.stl
 
-# --- 端口框架表（mount_point 为和外部驱动器连接的点位，pin_connector 为与 M-REx Unit连接点位）---
+# --- 端口框架表（attachment_point 为和外部驱动器连接的点位，pin_connector 为与 M-REx Unit连接点位）---
 frames:
-  - { name: mount_point, host: body, exposed: true, semantic_tag: connector, polarity: plug }
+  - { name: attachment_point, host: body, exposed: true, semantic_tag: connector, polarity: plug }
   - { name: pin_connector, host: body, exposed: true, semantic_tag: dock, polarity: plug }
 
 # --- 内部运动学图 · 固定变换 ---
@@ -34,10 +34,8 @@ fixed_transforms:
     to_frame: pin_connector
     translation: [3.5355, 5, 3.5355] # sqrt(50)/2
     rotation: { axis_angle: { omega: [0, 1, 0], q: 0.7854 } }
-    provisional: true
   - from_frame: body
-    to_frame: mount_point
+    to_frame: attachment_point
     translation: [0, 0, 0]
     rotation: { align: { a: ["+Z", "+X"], b: ["+X", "+Z"] } }
-    provisional: true
 

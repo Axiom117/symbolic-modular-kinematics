@@ -3,7 +3,7 @@
 > L1 模块库的文本优先定义。每个 `*.yaml` 是一个模块类（`module_type`），
 > 由 [../schema/module-definition.schema.yaml](../schema/module-definition.schema.yaml) 校验，
 > 遵循 [../modeling-conventions.md](../modeling-conventions.md) 与
-> [../schema/conventions.yaml](../schema/conventions.yaml)。
+> [../conventions.yaml](../conventions.yaml)。
 
 ## 内容
 
@@ -13,7 +13,8 @@
 | [pin.yaml](pin.yaml) | `Pin` 销钉连接件 | structural | 0 |
 | [joint.yaml](joint.yaml) | `Joint` 铰接关节件 | kinematic | 1 |
 | [adaptor.yaml](adaptor.yaml) | `Adaptor` 坐标适配件 | structural | 0 |
-| [pipette_body.yaml](pipette_body.yaml) | `Pipette_body` 工具末端件 | structural | 0 |
+| [toolPipette.yaml](toolPipette.yaml) | `Pipette_body` 工具末端件 | structural | 0 |
+| [Manipulator.yaml](Manipulator.yaml) | `Manipulator` 外部驱动接口件（非 SLX） | kinematic | 3 |
 | [slx-to-text-mapping.md](slx-to-text-mapping.md) | SLX → 文本 一一映射表 | — | — |
 
 ## 三层数据结构
@@ -28,8 +29,8 @@
 
 `extraction_status` 标注数据是否已从参考冻结：
 
-- `complete` —— 全部数值已冻结（当前仅 `Frame`）。
-- `partial` —— 含 `provisional: true` / `rotation: { pending: true }` 项，待源文件
+- `complete` —— 全部数值已冻结（`Frame`；以及非 SLX 的 `Manipulator`，其几何由我方设计直接冻结）。
+- `partial` —— 含 `rotation: { pending: true }` 项，待源文件
   `mrex_hypercube_modules.slx` 二进制可用后核实。详见 mapping 表第 0 节。
 
 ## 校验

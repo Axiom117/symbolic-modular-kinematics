@@ -30,10 +30,8 @@ fixed_transforms:
     to_frame: sideA
     translation: [0, 0, 0]
     rotation: { align: { a: ["+Z", "+Y"], b: ["+X", "+Z"] } }
-    provisional: true
   - from_frame: body
     to_frame: sideB
     translation: [0, 0, 0]
     rotation: { align: { a: ["+Z", "-Y"], b: ["+X", "+Z"] } }
-    provisional: true
 

@@ -100,7 +100,7 @@
 - **L1 模块（Module）**：把若干元件封装成的**参数化模板**，相当于一个类——定义一次、多次实例化。参考来源是 `slx_module_reference` 的库模块（`Frame`、`Pin`、`Joint`、`Adaptor`、`Pipette_body`），类比 Simulink 的 masked subsystem / library，或 OOP 的类加 xacro 宏。注意模块层的「`Frame` 模块」与元件层的「`Frame` 坐标系」同名但不同物。模块对外只暴露 `Port`。
 - **L2 机构（Mechanism）**：多个模块实例按端口连接组成的机构本体，类比 Simulink 子系统。机构只描述「本体长什么样、怎么拼」，可以是开环（树）或含闭环（一般图）。
 - **L3 执行层（Execution）**：把机构本体接入世界系与驱动源，闭合成自洽、可求解的系统。它定义「机构如何被固定、如何被驱动、闭环判据是什么」。
-  - **闭环驱动（M-REx 主构型）**：外部驱动器提供多自由度力旋量（wrench），与世界系一起把机构闭合成回路 `世界原点 → 外部驱动 #1 → 机构本体 → 外部驱动 #2 → 世界原点`。闭合此回路即产生**闭环判据**：解释器为回路切口生成相对位姿误差残差。
+  - **闭环驱动（M-REx 主构型）**：外部驱动器（如 microsupport）提供多自由度平移驱动，与世界系一起把机构闭合成回路 `世界原点 → 外部驱动 #1 → 机构本体 → 外部驱动 #2 → 世界原点`。闭合此回路即产生**闭环判据**：解释器为回路切口生成相对位姿误差残差。该外部驱动器由 `Manipulator` 关节模块物化（内部三个 `prismatic` 组合成 3-DOF 笛卡尔驱动，机构侧以 `socket` 对接 `Adaptor.mount_point`，世界侧以 `ground` frame 由 L3 绑定到 `world`）。
   - **开环驱动（测试构型）**：若关节自身可驱动（`actuated`），则无需外部驱动器，直接驱动关节即可形成开环串联构型（如 3R 链），解释器直接输出从世界系到末端的正运动学表达式。
 
 同一套机构本体（L2）可接入不同执行层（L3）：闭环执行得到闭环 IK 残差，开环执行得到开环 FK 表达式。这正是测试时「先用最简开环（如 3R 链）跑通、再上闭环 M-REx 机构」的依据。解释器读取 L1+L2+L3，沿层级链展开成元件级图，再生成与 [inverse-kinematics-solver-design.md](reference/inverse-kinematics-solver-design.md) 同构的几何约束（闭环）或正运动学表达式（开环），交给求解器。
@@ -117,13 +117,16 @@
 
 产出：
 
-- 一份简短但强约束的建模约定文档（[specs/modeling-conventions.md](../specs/modeling-conventions.md)）。
-- 一套后续 DSL 和解释器共同依赖的术语表（[specs/terminology.md](../specs/terminology.md)）与机器可读常量（[specs/schema/conventions.yaml](../specs/schema/conventions.yaml)）。
+| 文件 | 内容 |
+|------|------|
+| `specs/modeling-conventions.md` | 建模约定 prose（人的权威）：四层架构、元件类型、坐标系/单位/旋转约定、端口与连接语义、参数作用域 |
+| `specs/terminology.md` | 中英术语对照表：元件名、层级名、端口语义标签、连接类型、参数作用域 |
+| `specs/conventions.yaml` | 建模常量（机器的权威）：层级定义、元件类型枚举、语义标签枚举、端口/连接/执行层规则，供解释器与校验器读入 |
 
 过关标准：
 
 - 任意一个模块定义在不看图的前提下，也能仅靠文本约定被唯一解释。
-- 约定文档、术语表、机器可读常量三者无矛盾。
+- 约定文档（prose）、术语表、机器可读常量三者无矛盾。
 
 ### 阶段 A.1 · 模块库符号化定义
 
@@ -148,104 +151,252 @@
 
 产出：
 
-- 一份模块定义 schema。
-- 一组最小可用模块样例。
+| 文件 | 内容 |
+|------|------|
+| `specs/schema/module-definition.schema.yaml` | JSON Schema，校验模块 YAML 的字段完整性、类型、枚举值（三层数据结构 + 跨字段 `allOf` 约束） |
+| `specs/modules/Frame.yaml` | `Frame` 立方体结构件（structural, 0 DOF, 1 body + 6 socket 端口） |
+| `specs/modules/Pin.yaml` | `Pin` 销钉连接件（structural, 0 DOF, 1 body + 2 plug 端口） |
+| `specs/modules/Joint.yaml` | `Joint` 铰接关节件（kinematic, 1 DOF revolute, 2 bodies + 2 plug 端口） |
+| `specs/modules/Adaptor.yaml` | `Adaptor` 坐标适配件（structural, 0 DOF, 1 body + 2 plug 端口） |
+| `specs/modules/ToolPipette.yaml` | `Pipette_body` 工具末端件（structural, 0 DOF, 1 body + 1 plug + 1 任务系） |
+| `specs/modules/Manipulator.yaml` | `Manipulator` 外部驱动接口件（kinematic, 3 DOF cartesian = 3 prismatic, 4 bodies + 1 socket + 1 ground frame, 非 SLX 来源） |
 
 过关标准：
 
 - 任意一个核心模块都可以脱离 `slx` 单独实例化。
-- 模块step模型加载成功，能在可视化中正确显示模型与端口坐标系等信息
+- 全部模块 YAML 通过 `module-definition.schema.yaml` 校验。
 - 使用文本定义重建出的模块端口位姿关系，与 `slx` 中对应模块的参考框架关系一致。
+- `Manipulator` 零位（dx=dy=dz=0）内部链为恒等，满足 §2.4 初始零位条件。
 
 ### 阶段 A.2 · 机构描述语言（DSL）v0
 
-目标：在模块定义之上，再定义一层“如何拼机构”的语言，使机构拓扑可以文本化表达。
+目标：在模块定义之上，再定义一层「如何拼机构」的语言，使机构拓扑可以文本化表达。
 
 这一层不要一开始就追求复杂语法。优先保证语义严谨、易解析、可验证。
+DSL 在本阶段的定位是「机构结构说明书」——描述哪些模块实例、如何连接、哪些变量暴露，
+不涉及求解。A.3 解释器将其编译为 IR。
+
+#### A.2.1 DSL 语法规范
+
+定义 DSL 的完整语法规则，使每份机构描述文件有唯一合法写法。
+
+- 模块实例声明语法：`instance <instance_name> : <module_type> [with <param = value>, ...]`
+- 连接语法：`<instance>.<port> -> <instance>.<port>`，含可选的 `roll` 装配参数
+- 世界坐标系入口：`world` 为机构图唯一根，`ground` 语义标签的 frame 显式绑定到 `world`
+- 末端任务坐标系声明：`endFrame: <instance>.<port>`，标记 FK/IK 输出目标
+- 自由变量暴露规则：区分三类变量——
+  - **几何参数**（模块类参数，如 `cubeLength`，实例化时给定数值）
+  - **关节变量**（模块内部 `joint.variable`，在 L3 指派为 `actuated` 输入或 external-driver 未知量）
+  - **任务变量**（末端目标位姿，求解输入）
+- 闭环标记：`closed` 关键字标记需闭合的回路，标注切口位置供 A.4 使用
+
+产出文件：
+
+| 文件 | 内容 |
+|------|------|
+| `specs/dsl/grammar.md` | DSL 语法规范（EBNF 或结构化 prose） |
+| `specs/dsl/connection-semantics.md` | 端口连接在 DSL 层的语义：mate 展开规则、`roll` 参数语法、极性门控的 DSL 表达 |
+| `specs/schema/mechanism-assembly.schema.yaml` | JSON Schema，校验 DSL 机构描述文件的静态结构 |
+
+#### A.2.2 DSL 校验 schema
+
+`mechanism-assembly.schema.yaml` 校验的内容：
+
+- 每个实例引用的 `module_type` 在模块库中存在
+- 每个连接两端的端口名在其模块定义中注册且 `exposed: true`
+- 连接极性满足 `socket↔plug`（`ground` frame 与 `world` 绑定除外）
+- 端口不被重复占用
+- `endFrame` 声明的坐标系存在且可到达
+- 所有 `world` 绑定指向 `semantic_tag: ground` 的 frame
+- `closed` 切口声明合法（frame 对存在、不悬空）
+
+#### A.2.3 DSL 示例
+
+三个最小示例，覆盖从开环到闭环的验证路径：
+
+| 示例文件 | 结构 | 验证目标 |
+|------|------|------|
+| `specs/dsl/examples/open-chain-2r.yaml` | 两段串联转动副 + 工具末端 | 变换传播、端口拼接、FK 输出 |
+| `specs/dsl/examples/single-closed-loop.yaml` | 4 杆单闭环或 Manipulator–机构–Manipulator 闭环 | 闭环约束提取、未知量识别 |
+| `specs/dsl/examples/parallel-prototype.yaml` | 三支链并联（类比 MRF 2.4 构型） | 多支链 FK 传播、多切口约束构造 |
+
+每个示例必须附带：
+- 拓扑图（Mermaid 或 ASCII art，可放在示例文件头部注释中）
+- 符号变量表
+- 预期末端位姿表达式或闭环残差表达式的手工推导（对照用）
+
+#### A.2.4 过关标准
+
+- 同一机构结构不存在两种等价但解释不同的 DSL 写法。
+- `mechanism-assembly.schema.yaml` 对非法连接、重复占用端口、悬空端口、缺失参数能明确报错（校验器拒绝）。
+- 三个示例均通过 schema 校验，且手工推导的变换链与 DSL 语义一致。
+
+#### A.2.5 · DSL 装配可视化验证
+
+目标：编写模块组装后的可视化脚本，在 DSL 层面直接验证装配语法能否正确拼出模块化机构。与 A.1 中 `visualize_module.m` 对单模块做内部 frame graph 可视化同理，本节的脚本面向「机构级」——读入 DSL 机构描述文件，按连接规则组装多个模块实例并绘制完整的装配体。
+
+这是 A.2 与 A.1 之间的关键桥接验证：A.1 验证每个模块自身定义正确，A.2.5 验证多个模块按 DSL 连接后整体几何正确。如果这一步不过，A.3 解释器的变换链推导就缺少可信的几何参照。
+
+**设计原则：复用 A.1 的显示原语。** `visualize_mechanism` 不重写渲染逻辑，而是复用 `visualize_module.m` 中已验证的显示管线。具体而言，`local_triad`（RGB 坐标三轴）、`local_import_geometry` / `local_patch_geometry`（STEP 几何渲染）、FK 迭代传播算法和 frame 位姿报告等核心原语应抽成共享工具函数。机构级脚本的增量工作集中在「多实例图构建」——解析 DSL 机构文件、加载多模块定义、插入实例间 mate 连接边、处理命名空间前缀——构建完毕后交给同一套渲染管线出图。
 
 具体任务：
 
-- 定义模块实例声明语法，例如模块类型、实例名、实例参数。
-- 定义连接语法，明确写出 `实例.端口 -> 实例.端口` 的拓扑关系。
-- 定义基准刚体或世界坐标系入口，避免机构描述没有根。
-- 定义末端任务坐标系的声明方式，用于后续 FK/IK 输出接口。
-- 定义自由变量暴露规则：哪些变量是外部输入，哪些变量是内部待求未知量。
-- 预留闭环标记或图结构能力，但第一版先以开环可读性和可检验性为主。
-
-建议先支持两种结构：
-
-- **开环链式结构：** 用来验证变换传播、端口拼接和 FK 输出。
-- **单闭环结构：** 用来验证闭环约束提取与未知量求解接口。
+- 将 `visualize_module.m` 中的 `local_triad`、几何导入渲染、FK 传播、位姿报告等显示原语抽取为共享工具文件（如 `viz_common.m` 或 `+viz` 包目录），供 A.1 与 A.2.5 共用。
+- 编写 `visualize_mechanism.m`：读入一份 DSL 机构描述文件（如 `specs/dsl/examples/open-chain-2r.yaml`），解析其中的实例声明、端口连接和参数赋值。
+- 对每个实例，加载对应模块 YAML 定义（复用 A.1 的模块库），按实例参数注入数值，构建模块自身的 frame graph，并为所有内部 frame/body 名加实例名前缀以避免跨实例命名冲突。
+- 按 DSL 连接声明，在实例之间插入 mate 变换边（`Rx(π) · Rz(roll)`，与 `modeling-conventions.md` §10.2 一致），将分散的模块 frame graph 拼合成一张全局机构图。
+- 处理 `world` 绑定：将 DSL 中声明为 `ground` 语义标签的 frame 通过标定偏移挂载到 `world` 根节点。
+- 调用共享 FK 传播与渲染管线，计算所有 body 中心坐标系和 port 坐标系的全局位姿并出图。
+- 可视化输出：
+  - 每个 body 的 STEP 几何（若有）或简化包围盒。
+  - 每个 frame/port 的 RGB 坐标三轴（X=红, Y=绿, Z=蓝）。
+  - 连接边以虚线或半透明线段标注，便于直观检查端口对插是否对齐。
+  - 关节轴以不同颜色高亮，标注自由度方向。
+- 支持 `mechanism_viz_config.yaml` 注入关节变量值（如转动角 `q`），可视化特定构型姿态。
+- 输出每个实例的 frame 全局位姿报告，供与手工推导的变换链做数值对比验证。
 
 产出：
 
-- DSL v0 草案。
-- 两到三个最小示例：一个开环、一个单闭环、一个并联雏形。
+| 文件 | 内容 |
+|------|------|
+| `scripts/matlab/visualize_mechanism.m` | DSL 机构装配可视化主脚本 |
+| `scripts/matlab/mechanism_viz_config.yaml` | 机构可视化参数注入配置（关节变量值等） |
 
 过关标准：
 
-- 同一结构不能存在两种等价但解释不同的写法。
-- 解释器对非法连接、重复占用端口、悬空端口、缺失参数要能明确报错。
+- 对 A.2.3 的三个 DSL 示例（开环 2R 链、单闭环、并联雏形），`visualize_mechanism` 均能正确渲染完整装配体。
+- 端口对插处在视觉上对齐（mate 变换后两端口坐标系原点重合、法向相反），无肉眼可见错位。
+- 全局 frame 位姿报告与手工推导的变换链数值一致（误差 < 1e-9）。
+- 修改变量注入配置后刷新可视化，关节姿态变化符合预期。
 
 ### 阶段 A.3 · 解释器 v0：先跑通开环
 
 目标：先让解释器稳定吃下开环机构描述，输出可验证的刚体变换链和 FK 表达式。
 
-这是阶段 A 的第一个硬门槛，因为它能最便宜地暴露模块定义是否严谨、端口语义是否自洽、图遍历逻辑是否正确。
+这是阶段 A 的第一个硬门槛，因为它能最便宜地暴露模块定义是否严谨、端口语义是否自洽、图遍历逻辑是否正确。解释器分两步走：v0 只做开环（tree），v1（A.4）扩展到闭环。
 
-具体任务：
+#### A.3.0 解释器流水线
 
-- 解析模块定义和机构描述，构建内部图表示。
-- 对每个实例完成参数绑定与符号变量注册。
-- 把端口连接翻译成坐标系拼接规则。
-- 生成一条从世界坐标系到末端坐标系的有序变换链。
-- 输出位置和姿态的显式符号表达式。
-- 提供结构校验：图是否连通、是否存在多根、是否出现方向冲突。
+```
+DSL 机构文件   ──→  语法校验   ──→  IR 展开   ──→  结构校验   ──→  FK/约束生成
+     │              (A.2 schema)      (A.3.1)       (A.3.2)        (A.3.3/A.4)
+     ▼
+ L3 执行配置   ──→  语义校验   ──→  world 绑定 + 变量指派
+                 (execution-config schema)
+```
 
-解释器内部建议显式维护以下中间表示：
+#### A.3.1 IR 展开：DSL → 元件级图
 
-- `body / frame / joint` 节点
-- `fixedTransform` 边
-- `jointTransform` 边
+解析模块定义与 DSL 机构描述，展开为 L0 元件级图。这是解释器的核心翻译步骤。
+
+**输入**：
+- 模块库（`specs/modules/*.yaml`，经 A.1 schema 校验）
+- DSL 机构文件（经 `mechanism-assembly.schema.yaml` 校验）
+
+**处理**：
+- 对每个实例复制模块模板，展开 `bodies` / `frames` / `fixed_transforms` / `joints`，为所有内部元件加实例名前缀以避免冲突
+- 完成参数绑定：把实例参数值代入模块类参数表达式（如 `cubeLength=10` → `cubeLength/2` → `5`）
+- 处理端口连接：根据 mate 变换（§10.2 `Rx(π) · Rz(roll)`）在 IR 中插入连接边，把两个 `exposed` frame 桥接起来
+- 注册符号变量到 `symbolRegistry`：尺寸参数（数值化后）、关节变量、任务变量
+- 展开 `portAttachment` 映射：记录每个 port 连接后在 IR 中的桥接关系
+
+**输出（IR）**：
+- 元件级节点集合：`body` / `frame` / `joint`（`constraint` 仅 A.4 生成）
+- 元件级边集合：`fixedTransform` / `jointTransform`
 - `portAttachment` 映射
-- `symbolRegistry`（尺寸参数、任务变量、关节变量）
+- `symbolRegistry`
 
-产出：
+**变量注册表（variable registry）**：IR 展开时，解释器收集所有标记 `observable: true` 的 frame 和 joint variable，以实例限定名（如 `mc1.dx`、`pipette.tip_origin`）汇总为扁平列表。未标记 observable 的内部 frame/joint 仍参与运动学传播计算，但不注册到输出池。注册表中的变量在 A.3 执行配置中由用户分区为 `known`（已知输入）或 `unknown`（待求输出）——这个分区直接决定 FK/IK 方向，无需解释器内置模式切换。详见 `modeling-conventions.md` §3.6。
 
-- 一个能生成开环 FK 符号表达式的 MATLAB 解释器原型。
-- 一套开环验证样例，例如单段、两段串联、带工具坐标的链式结构。
+**IR 规范文件**：
 
-过关标准：
+| 文件 | 内容 |
+|------|------|
+| `specs/ir/node-types.md` | IR 节点类型定义：`body`（含中心 frame）、`frame`（含 host、exposed、polarity、semantic_tag）、`joint`（kind/axis/variable）、`constraint` |
+| `specs/ir/edge-types.md` | IR 边类型定义：`fixedTransform`（from/to + 刚性位姿）、`jointTransform`（from/to + 关节参数化位姿） |
+| `specs/ir/symbol-registry.md` | 符号注册表规范：变量命名空间（模块级/实例级/全局）、类型（几何参数/关节变量/任务变量）、冲突检测规则 |
+| `specs/ir/port-attachment.md` | portAttachment 映射规范：连接桥接边的插入规则、mate 变换在 IR 中的表达 |
+| `specs/ir/dsl-to-ir-mapping.md` | DSL 构造到 IR 节点/边的展开规则（实例展开、连接翻译、参数代入） |
+| `specs/schema/ir-graph.schema.yaml` | JSON Schema，校验展开后的 IR 图结构完整性 |
+
+#### A.3.2 IR 结构校验
+
+在 FK 生成之前，对 IR 图做静态完整性校验：
+
+- **引用完整性**：所有 `frame.host` 引用的 `body` 存在；所有 `fixedTransform.from_frame` / `to_frame` 和 `joint.from_frame` / `to_frame` 引用的 `frame` 或 `body` 存在
+- **连通性**：从 `world` 节点出发可到达所有 `body` 节点（无孤立子图）
+- **无多根**：除 `world` 外无其他根节点
+- **类型一致性**：`joint.from_frame` / `to_frame` 不能是 `exposed` frame 或 `body` 中心 frame——必须是内部 hinge frame（当前约定：`joint` 两端为模块内部 frame，不直接接 port）
+- **symbolRegistry 无冲突**：同一变量名不被重复注册为不同类型
+
+> 这些校验中，引用完整性和类型检查属于 JSON Schema 无法覆盖的跨数组约束，必须在解释器代码中实现。`ir-graph.schema.yaml` 只覆盖字段存在性与类型。
+
+#### A.3.3 开环 FK 生成
+
+对开环机构的 IR 图执行正向运动学传播：
+
+- 从 `world` 节点出发，沿 `fixedTransform` 和 `jointTransform` 边做深度优先遍历
+- 每步累积 `T = T_current · T_edge`（先平移后旋转，§8）
+- 末端输出为相对于 `world` 的 4×4 齐次变换矩阵符号表达式
+- 位置和姿态分别提取：位置 = `T(1:3, 4)`，姿态 = Z-Y-X 欧拉角分解（`Rz(psi)·Ry(theta)·Rx(phi)`）
+
+**执行配置（L3，开环）**：
+
+| 文件 | 内容 |
+|------|------|
+| `specs/schema/execution-config.schema.yaml` | JSON Schema，校验 L3 执行配置（开环与闭环共用） |
+
+开环执行配置声明：
+- `mode: open_loop`
+- `world_binding`：哪些 `ground` frame 绑定到 `world`（含静态标定偏移）
+- `actuated_joints`：哪些关节变量是驱动输入（如 `Manipulator` 的 `dx/dy/dz` 在开环测试中为 actuated）
+- `endFrame`：FK 输出的目标坐标系
+
+#### A.3.4 过关标准
 
 - 解释器输出的末端位姿表达式与手工推导结果一致。
 - 对同一条开环链，替换不同模块参数后仍能稳定生成新表达式，无需改解释器逻辑。
+- IR 展开后无孤立节点、无悬空引用。
+- `ir-graph.schema.yaml` 校验通过。
 
 ### 阶段 A.4 · 解释器 v1：扩展到闭环约束
 
-目标：在开环遍历稳定后，再把解释器扩展到闭环机构，让它能自动识别独立闭环并构造约束方程。
+目标：在开环遍历稳定后，把解释器扩展到闭环机构，让它能自动识别独立闭环并构造约束方程。
 
-这里的关键不是“直接求解”，而是“正确生成约束”。
+这里的关键不是「直接求解」，而是「正确生成约束」。A.4 复用 A.3 的全部 IR 展开与校验基础设施，
+仅增加闭环回路处理。
 
-具体任务：
+#### A.4.1 回路识别与切开
 
-- 在机构图中识别回路，并区分树边与闭环补边。
-- 为每条闭环定义统一的切开策略，把闭环暂时转成一棵可遍历的树。
-- 为切开位置生成相对位姿误差表达式。
-- 将位姿误差拆成位置约束和姿态约束，形成残差向量。
-- 支持“只约束不允许自由度”的机制，复用 `inverse-kinematics-solver-design` 中的思路，而不是一律强行闭合全部 6 个分量。
-- 明确未知量集合、已知任务量集合和固定几何参数集合。
+- 在 IR 图中识别回路：从 `world` 出发做 DFS 生成树，区分树边与闭环补边（chord）
+- 为每条闭环补边定义统一切开策略：在补边连接的 `frame` 对处切割，将闭环暂时转成一棵可遍历的树
+- 切开处生成 `constraint` 节点：记录切口两侧坐标系对 `(F_near, F_far)`（见 §3.5）
 
-这一步需要特别注意约束设计不能写死为某一种机构。解释器应输出“闭环误差候选项”，再由机构定义或求解配置指定实际采用哪些约束分量。
+#### A.4.2 闭环约束构造
 
-产出：
+- 对每个切口，沿两条支路分别从切口传播到 `world`（或共同祖先），计算两侧坐标系的相对位姿：
+  $$T_{\text{residual}} = T_{\text{far}}^{-1} \cdot T_{\text{near}}$$
+- 将位姿误差拆为 6 个分量的残差候选项：`[tx, ty, tz, rx, ry, rz]`（平移 mm，姿态 Z-Y-X 欧拉角 rad，§8）
+- **不一律强闭合 6 分量**：由机构 DOF 分析与 L3 执行配置中的 `constrained_components` 字段指定实际约束哪些分量。欠约束/过约束由 A.4 DOF 校验报告，不静默跳过
+- 明确未知量集合（external-driver 关节变量，如 `Manipulator` 的 `dx/dy/dz`）、已知任务量（末端目标位姿）和固定几何参数
 
-- 一个能从单闭环拓扑生成约束向量的解释器版本。
-- 至少一个对照案例：解释器输出的约束结构，与手工建立的闭环约束在物理意义上一致。
+#### A.4.3 执行配置（L3，闭环）
 
-过关标准：
+复用 `specs/schema/execution-config.schema.yaml`，闭环构型额外声明：
+
+- `mode: closed_loop`
+- `world_binding`：同开环
+- `external_drivers`：哪些 `Manipulator` 实例的关节变量是闭环未知量
+- `closure_cuts`：切口位置声明 `{near: <instance>.<frame>, far: <instance>.<frame>}`
+- `constrained_components`：每切口须归零的位姿分量子集（`[tx, ty, tz, rx, ry, rz]` 的子集）
+- `tolerances`：收敛阈值（平移 mm，姿态 rad）
+
+#### A.4.4 过关标准
 
 - 对一个简单闭环机构，解释器能正确给出未知量数量、约束数量和残差表达式。
 - 更换闭环切开位置后，得到的约束系统在物理上等价。
+- 约束数量 + 外部驱动 DOF 数量 ≤ 切口分量总数（不过约束）。
+- 残差表达式经手工代入零位构型验证恒为零。
 
 ### 阶段 A.5 · 接入 MRF 2.4 求解模板
 
@@ -296,6 +447,7 @@
 - DSL v0 已能稳定描述开环和至少一种闭环机构。
 - 解释器已能生成开环 FK 表达式和闭环约束表达式。
 - 生成结果已成功接入现有 MATLAB 数值求解流程。
+- 符号求解管线已集成到 PathPlanner，替换 Simulink IK/FK 内核，通过集成验证（见 A.7.1）。
 - 至少一个闭环 IK 案例和一个 FK 案例完成端到端验证。
 - 当前失败模式已基本收敛到“模型本身不可解”或“数值求解配置不佳”，而不是“语言含义不清”或“解释器生成错误”。
 
@@ -306,6 +458,61 @@
 3. 闭环切开策略和约束选择是否不合理。
 4. 未知量与约束数量是否匹配。
 5. 求解器初值和边界是否只是数值层问题。
+
+#### A.7.1 PathPlanner 集成验证（关键里程碑）
+
+在端到端符号求解管线跑通后，将新求解器集成到现有 PathPlanner 中，替换其 Simulink/Simscape IK/FK 内核。这是整个阶段 A 最具说服力的验证——在真实应用环境中证明新算法的可靠性与准确性。
+
+**集成策略**：
+
+```
+PathPlanner 现有架构                    替换后
+─────────────────────────────         ─────────────────────────────
+ configs/ (robot/sim/controller/comm)  → 不变（参数映射到 DSL 实例参数）
+ PathPlannerClient (TCP + 路径规划)     → 不变
+ Simulink IK/FK Solver                 → 替换为符号求解管线
+   ├── model_2R_RCM_IK.slx             → DSL 机构文件 + execution-config
+   └── model_2R_RCM_FK.slx             → (同上，切换 open_loop 模式)
+ PATH_DATA 打包 / 轨迹下发              → 不变
+ ControllerPanel TCP Server             → 不变
+```
+
+**具体任务**：
+
+1. **机构 DSL 建模**：用 DSL 描述 PathPlanner 的 2R 平面闭链机构（Link A–B–C + 两台 MicroSupport + 末端执行器）。`Manipulator` 模块直接对应两台 3-DOF 微操作器（`MC1`、`MC2`）；`Joint` 模块对应被动转动关节 A–B、B–C。
+
+2. **参数映射**：将 `robot_params.m` 中的几何参数（`CubeLength`、`TipDistance`、`TiltAngle`）映射为 DSL 实例参数；将 `sim_params.m` 中的初值与边界映射为求解配置。
+
+3. **求解器替换**：在 `PathPlannerClient.onCalcIK()` 和 `onCalcFK()` 内部，将 Simulink 模型调用替换为符号求解管线调用——
+   - IK：`target_pose → symbolic IK solver → [MC1 displacement, MC2 displacement]`
+   - FK：`[MC1 displacement, MC2 displacement] → symbolic FK solver → end_effector_pose`
+   - 输入输出接口保持与现有 `PATH_DATA` 格式兼容
+
+4. **对比验证**：对同一组目标位姿序列，分别运行旧 Simulink 求解器和新的符号求解器，对比：
+   - 微操作器位移输出（MC1 x/y/z, MC2 x/y/z）的数值差异
+   - 末端位姿 FK 输出的差异
+   - 求解时间（单次 IK/FK）
+   - 收敛率（IK 成功率）
+
+5. **回归测试**：在替换求解器后，完整运行一次 PathPlanner 的标准工作流：
+   ```
+   connect → GetStatus → onCalcIK → PlanPath → ExecutePath
+   ```
+   验证 TCP 通信、轨迹打包、路径执行均不受影响。
+
+**产出**：
+
+| 产出 | 说明 |
+|------|------|
+| `specs/dsl/examples/pathplanner-2r-closed-loop.yaml` | PathPlanner 2R 机构的 DSL 描述 |
+| `tests/regression/pathplanner-solver-comparison.m` | 新旧求解器对比脚本：相同输入 → 输出差异统计 |
+| `tests/regression/pathplanner-integration-results.md` | 集成验证报告：精度、速度、成功率、回归结果 |
+
+**过关标准**：
+
+- 新旧求解器对相同目标位姿的微操作器位移输出偏差 ≤ 1%（或 ≤ 0.1 mm 量级）
+- PathPlanner 完整工作流（connect → GetStatus → IK → PlanPath → ExecutePath）在替换求解器后正常运行
+- TCP 通信、配置管理、路径规划模块未因求解器替换而修改
 
 **阶段 B · 跨平台等价实现（Python）**
 

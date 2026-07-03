@@ -1,0 +1,79 @@
+# yaml-language-server: $schema=../schema/module-definition.schema.yaml
+# 模块：Manipulator（外部驱动接口件）
+# 参考来源：无 SLX 来源——我方设计的驱动接口模块（见 modeling-conventions.md §2.4、§5.6）
+# 数据权威来源：modeling-conventions.md §2.4、§5.6、§9.5
+#
+# 作用：把外部驱动器（如 microsupport 的 XYZ 三轴微操作台）物化成一个 L1 关节模块。
+# 它同时承担两件事：
+#   1. 提供 3-DOF 笛卡尔平移驱动 —— 内部串联三个 1-DOF prismatic 关节（dx/dy/dz），
+#      沿 +X/+Y/+Z 依次驱动。无需引入 cartesian 关节类型（§3.4）。
+#   2. 把机构接地到世界系 —— world 侧暴露一个 ground frame（semantic_tag: ground，无 polarity），
+#      由 L3 执行层绑定到 world；机构侧暴露一个 socket 端口 dock，对接 Adaptor.mount_point(plug)。
+#
+# 极性说明（§9.5）：Manipulator 是 Frame 之外第二个 socket 提供者。其 dock 为 socket，
+# 与 Adaptor.mount_point(plug) 构成合法 socket↔plug 连接。ground 为世界侧接地 frame，
+# 不带 polarity、不作机械 mate，仅由 L3 绑定到 world。
+#
+# 零位约定：dx=dy=dz=0 时内部链为恒等变换（ground 与 dock 仅相差一次接地对齐/端口对齐，
+# 无平移），满足 §2.4 的初始零位条件——驱动器零位与机构零位重合。
+#
+# 执行构型（L3 指派，模块本身不写）：
+#   闭环（M-REx 主构型）：dx/dy/dz 作为 external driver 未知量，由闭环残差求解。
+#   开环（测试构型）：dx/dy/dz 作为 actuated 直接驱动，形成开环链。
+#
+# 拓扑链（world 侧 → 机构侧）：
+#   ground ←FT— base —[prismatic dx]— stageX —[prismatic dy]— stageY —[prismatic dz]— carriage —FT→ dock
+
+module_type: Manipulator
+category: kinematic
+dof: 3
+description: 外部驱动接口件，把外部驱动器的 XYZ 三轴平移物化为 3-DOF 笛卡尔驱动，并把机构接地到世界系。
+source: derived (external-driver interface; non-SLX)
+extraction_status: complete
+
+# --- 内部运动学图 · 刚体（串联平移台，base 接地 / carriage 载机构）---
+bodies:
+  - name: base      # world 侧接地体
+  - name: stageX    # 沿 +X 平移后的中间体
+  - name: stageY    # 沿 +Y 平移后的中间体
+  - name: carriage  # 机构侧末端体，承载 socket 端口
+
+# --- 端口框架表 ---
+# ground：world 侧接地 frame（exposed，无 polarity，由 L3 绑定 world，非机械 mate）。
+# dock  ：机构侧 socket 端口，对接 Adaptor.mount_point(plug)。
+frames:
+  - { name: ground, host: base, exposed: true, semantic_tag: ground, observable: true }
+  - { name: dock, host: carriage, exposed: true, semantic_tag: connector, polarity: socket, observable: true }
+
+# --- 内部运动学图 · 固定变换（body 中心 frame → 各端口）---
+# 均为零平移；ground 与世界轴对齐（恒等），dock 令 socket +Z 沿 carriage +Z 朝外。
+fixed_transforms:
+  - from_frame: base
+    to_frame: ground
+    translation: [0, 0, 0]
+    rotation: { align: { a: ["+Z", "+Z"], b: ["+X", "+X"] } }
+  - from_frame: carriage
+    to_frame: dock
+    translation: [0, 0, 0]
+    rotation: { align: { a: ["+Z", "+Z"], b: ["+X", "+X"] } }
+
+# --- 内部运动学图 · 关节（三个 1-DOF prismatic 串联 = 笛卡尔 3-DOF）---
+joints:
+  - from_frame: base
+    to_frame: stageX
+    kind: prismatic
+    axis: [1, 0, 0]
+    variable: dx
+    observable: true
+  - from_frame: stageX
+    to_frame: stageY
+    kind: prismatic
+    axis: [0, 1, 0]
+    variable: dy
+    observable: true
+  - from_frame: stageY
+    to_frame: carriage
+    kind: prismatic
+    axis: [0, 0, 1]
+    variable: dz
+    observable: true

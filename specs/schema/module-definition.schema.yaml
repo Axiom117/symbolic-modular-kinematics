@@ -23,7 +23,6 @@ additionalProperties: false
 required:
   - module_type
   - category
-  - dof
   - bodies
   - frames
   - fixed_transforms
@@ -162,14 +161,17 @@ $defs:
         description: 真即为 port，可跨模块连接；缺省 false。
         type: boolean
       semantic_tag:
-        description: 仅注释，不影响运动学（§9.3）。
+        description: >-
+          不参与机械 mate 与运动学变换生成（§9.3）；但 `ground` 标签触发 L3 world
+          绑定（Manipulator.ground → world），`tool` 标签标记 FK/IK 输出候选系。
         type: string
-        enum: [connector, joint_side, tool, dock]
+        enum: [connector, joint_side, tool, dock, ground]
       polarity:
         description: >-
-          机械对接极性（§9.5）：socket = 凹面钢片（仅 Frame 面），plug = 凸面磁铁
-          （其余贴到 Frame 上的机械面）。连接仅允许 socket↔plug。可选：任务/工具
-          参考系（如 tip_origin）不带 polarity，只作 FK/IK 输出，不参与机械连接。
+          机械对接极性（§9.5）：socket = 凹面钢片（Frame 六面 + Manipulator.dock），
+          plug = 凸面磁铁（其余贴到 socket 面上的机械面）。连接仅允许 socket↔plug。
+          可选：任务/工具参考系（如 tip_origin）与接地系（如 Manipulator.ground）
+          不带 polarity，不参与机械 mate。ground frame 由 L3 绑定到 world（§2.4）。
         type: string
         enum: [socket, plug]
       symmetry:
@@ -178,6 +180,13 @@ $defs:
           自我等价。缺省 4（当前方钢片接口 C4）。约束连接 roll 的合法离散取值。
         type: integer
         minimum: 1
+      observable:
+        description: >-
+          真表示此 frame 相对于 world 的位姿须由解释器计算并纳入输出。
+          独立于 exposed：机械端口（exposed:true）的位姿天然在连接链上可查；
+          observable 让非端口 frame（如工具尖端 tip_origin）或需显式输出的端口
+          frame（如 Manipulator.dock）也能被标明为观测目标。缺省 false。
+        type: boolean
 
   fixedTransform:
     description: 两 frame 间无自由度刚性位姿，先平移后旋转（§3.3、§8）。
@@ -191,9 +200,6 @@ $defs:
       to_frame: { $ref: "#/$defs/portName" }
       translation: { $ref: "#/$defs/translation" }
       rotation: { $ref: "#/$defs/rotation" }
-      provisional:
-        description: 真表示数值为占位值，待 SLX 核实，未冻结。
-        type: boolean
       note: { type: string }
 
   joint:
@@ -220,10 +226,12 @@ $defs:
         minItems: 2
         maxItems: 2
         items: { $ref: "#/$defs/scalarOrExpr" }
-      provisional:
-        description: 真表示 axis 等数值为占位值，待 SLX 核实。
-        type: boolean
       note: { type: string }
+      observable:
+        description: >-
+          真表示此关节的变量值（revolute 的 q、prismatic 的 d）须由解释器纳入输出。
+          用于暴露被动关节角度或驱动位移等内部状态供诊断/验证读取。缺省 false。
+        type: boolean
 
 # ---------------------------------------------------------------------------
 # 顶层（模块定义表）
@@ -241,13 +249,11 @@ properties:
     enum: [structural, kinematic]
 
   dof:
-    description: 模块内部总自由度。
+    description: >-
+      模块内部总自由度，由 joints 数组自动推导（每个 joint 当前为 1-DOF）。
+      可选字段，纯信息标注；省略时由校验器/解释器从 joints 计算。
     type: integer
     minimum: 0
-
-  geometry:
-    description: 模块主几何资源名，仅供可视。
-    type: string
 
   description:
     type: string
@@ -258,7 +264,7 @@ properties:
 
   extraction_status:
     description: >-
-      complete = 全部数值已从参考冻结；partial = 含 provisional/pending 项，
+      complete = 全部数值已从参考冻结；partial = 含 `rotation.pending` 项，
       待 SLX 二进制核实。
     type: string
     enum: [complete, partial]
@@ -294,15 +300,14 @@ properties:
 # 跨字段一致性约束
 # ---------------------------------------------------------------------------
 allOf:
-  # 结构模块不得含 joint 且 dof 必须为 0
+  # 结构模块不得含 joint（dof 由 joints 推导，无需显式约束）
   - if:
       properties:
         category: { const: structural }
     then:
       properties:
-        dof: { const: 0 }
         joints: { maxItems: 0 }
-  # 运动模块必须含至少一个 joint
+  # 运动模块必须含至少一个 joint，且若声明 dof 则须 ≥1
   - if:
       properties:
         category: { const: kinematic }
@@ -310,3 +315,4 @@ allOf:
       required: [joints]
       properties:
         joints: { minItems: 1 }
+        dof: { minimum: 1 }

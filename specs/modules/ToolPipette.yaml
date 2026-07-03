@@ -5,7 +5,7 @@
 #
 # 工具模块：connector_side 为结构连接面，tip_origin 为工具尖端参考原点
 # （EndFrame 候选）。两端口平移已知；参考摘要未给出朝向（无 align 规则），
-# 故旋转以 pending/provisional 占位，extraction_status 为 partial。
+# 故旋转以 pending 占位，extraction_status 为 partial。
 
 module_type: Pipette_body
 category: structural
@@ -23,24 +23,20 @@ parameters:
 
 bodies:
   - name: body
-    geometry: assets/tool.STEP
+    geometry: assets/tool_pipette.stl
 
 # --- 端口框架表（connector_side 为机械对接面 plug；tip_origin 为任务系，无极性）---
 frames:
   - { name: connector_side, host: body, exposed: true, semantic_tag: connector, polarity: plug }
-  - { name: tip_origin, host: body, exposed: true, semantic_tag: tool }
+  - { name: tip_origin, host: body, exposed: false, semantic_tag: tool, observable: true }
 
-# --- 内部运动学图 · 固定变换（平移已知；朝向待 SLX 提取）---
+# --- 内部运动学图 ---
 fixed_transforms:
   - from_frame: body
     to_frame: connector_side
-    translation: [0, 5, 25]
-    rotation: { pending: true }
-    provisional: true
-    note: connector_side 朝向待从 SLX system_32 精确提取（参考仅给出平移）。
+    translation: [0, 4, 5]
+    rotation: { align: { a: ["+Z", "+Y"], b: ["+X", "+Z"] } }
   - from_frame: body
     to_frame: tip_origin
     translation: [0, 0, -tipDistance]
     rotation: { pending: true }
-    provisional: true
-    note: tip_origin 朝向待从 SLX system_32 精确提取（参考仅给出平移）。

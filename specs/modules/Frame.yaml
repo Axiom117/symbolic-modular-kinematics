@@ -28,12 +28,12 @@ bodies:
 
 # --- 端口框架表 · 六面端口（均为 exposed frame，polarity: socket）---
 frames:
-  - { name: faceX+, host: body, exposed: true, semantic_tag: connector, polarity: socket }
-  - { name: faceX-, host: body, exposed: true, semantic_tag: connector, polarity: socket }
-  - { name: faceY+, host: body, exposed: true, semantic_tag: connector, polarity: socket }
-  - { name: faceY-, host: body, exposed: true, semantic_tag: connector, polarity: socket }
-  - { name: faceZ+, host: body, exposed: true, semantic_tag: connector, polarity: socket }
-  - { name: faceZ-, host: body, exposed: true, semantic_tag: connector, polarity: socket }
+  - { name: faceX+, host: frame_hyper_cube, exposed: true, semantic_tag: connector, polarity: socket }
+  - { name: faceX-, host: frame_hyper_cube, exposed: true, semantic_tag: connector, polarity: socket }
+  - { name: faceY+, host: frame_hyper_cube, exposed: true, semantic_tag: connector, polarity: socket }
+  - { name: faceY-, host: frame_hyper_cube, exposed: true, semantic_tag: connector, polarity: socket }
+  - { name: faceZ+, host: frame_hyper_cube, exposed: true, semantic_tag: connector, polarity: socket }
+  - { name: faceZ-, host: frame_hyper_cube, exposed: true, semantic_tag: connector, polarity: socket }
 
 # --- 内部运动学图 · 固定变换（body 中心 frame → 各面端口）---
 fixed_transforms:
