@@ -39,9 +39,12 @@ function result = visualize_mechanism(dslYaml, configYaml)
     if nargin < 2; configYaml = ''; end
 
     here = fileparts(mfilename('fullpath'));
+
+    % dslYaml may be relative to this script; resolve to absolute path
     dslYaml = smk.PathUtils.resolve(dslYaml, here);
     assert(exist(dslYaml, 'file') > 0, 'DSL file not found: %s', dslYaml);
 
+    % parse dslYaml into a struct; validate top-level fields
     dsl = read_module_yaml(dslYaml);
     assert(isfield(dsl, 'mechanism'), 'Not a mechanism assembly: %s', dslYaml);
     ver = smk.CommonUtils.field(dsl, 'dsl_version', 0);
@@ -50,42 +53,63 @@ function result = visualize_mechanism(dslYaml, configYaml)
     mechName = dsl.mechanism;
     dslDir = fileparts(dslYaml);
 
-    % --- module library + parameter config ---
+    % find the module library relative to the DSL file
     libRel = smk.CommonUtils.field(dsl, 'module_library', '../../modules/');
+
+    % resolve to absolute path
     libDir = smk.PathUtils.resolve(libRel, dslDir);
     assert(exist(libDir, 'dir') > 0, 'Module library not found: %s', libRel);
 
-    typeIndex = local_module_index(libDir);      % module_type -> file path
+    % module_type -> file path
+    typeIndex = local_module_index(libDir);
 
+    % load the module library's geometric parameter config (by module_type)
     paramCfg = struct();
     paramCfgPath = fullfile(libDir, 'config', 'parameters.yaml');
     if exist(paramCfgPath, 'file'); paramCfg = read_module_yaml(paramCfgPath); end
 
+    % load the mechanism config (by instance name) if provided
     mechCfg = struct();
     if ~isempty(configYaml)
         configYaml = smk.PathUtils.resolve(configYaml, here);
         if exist(configYaml, 'file'); mechCfg = read_module_yaml(configYaml); end
     end
-    mechOv = struct();       % per-instance joint overrides for this mechanism
+
+    % per-instance joint overrides for this mechanism
+    mechOv = struct();
     mnf = matlab.lang.makeValidName(mechName);
     if isfield(mechCfg, mnf) && isstruct(mechCfg.(mnf)); mechOv = mechCfg.(mnf); end
 
     % --- iterate instances: load defs, inject params, expand internal graph ---
     assert(isfield(dsl, 'instances') && isstruct(dsl.instances), ...
         'Mechanism %s declares no instances.', mechName);
-    instNames = fieldnames(dsl.instances);
-    nInst = numel(instNames);
 
+    instNames = fieldnames(dsl.instances);
+
+    % number of instances in this mechanism
+    nInst = numel(instNames);
+    
+    % store all internal fixed-transform and joint edges, plus inter-instance mates
     edges = struct('from', {}, 'to', {}, 'T', {});
+
+    % record pending frames (from fixed transforms) for diagnostic triad coloring
     pendingMap = containers.Map('KeyType', 'char', 'ValueType', 'any');
+    
+    % cache module definitions by type to avoid re-reading the same YAML file
     defCache = containers.Map('KeyType', 'char', 'ValueType', 'any');
 
+    % initialize instance structures
     inst = struct('name', {}, 'type', {}, 'md', {}, 'bodies', {}, ...
         'frames', {}, 'joints', {});
+    
+    % record all frames marked as "ground" for seeding the FK pose propagation
     groundNodes = {};
 
+    % iterate instances: load defs, inject params, expand internal graph
     for i = 1:nInst
         iname = instNames{i};
+
+        % instance type is the module_type of the referenced module definition
         itype = dsl.instances.(iname).type;
 
         if isKey(defCache, itype)
@@ -94,7 +118,11 @@ function result = visualize_mechanism(dslYaml, configYaml)
             assert(isKey(typeIndex, itype), ...
                 'Instance "%s": module type "%s" not found in library %s.', ...
                 iname, itype, libRel);
+
+            % read module definition YAML file
             md = read_module_yaml(typeIndex(itype));
+
+            % cache the module definition for future instances of this type
             defCache(itype) = md;
         end
 
@@ -102,12 +130,20 @@ function result = visualize_mechanism(dslYaml, configYaml)
         params = struct();
         tf = matlab.lang.makeValidName(itype);
         if isfield(paramCfg, tf) && isstruct(paramCfg.(tf)); params = paramCfg.(tf); end
+
+        % joint overrides for this instance (from the mechanism config)    
         inf = matlab.lang.makeValidName(iname);
+
+        % check for joint variable overrides in the mechanism config for this instance
         if isfield(mechOv, inf) && isstruct(mechOv.(inf))
+            % ov: joint variable overrides for this instance; ofn: joint variable names
             ov = mechOv.(inf); ofn = fieldnames(ov);
+
+            % override any joint variables in the module definition with the mechanism config
             for q = 1:numel(ofn); params.(ofn{q}) = ov.(ofn{q}); end
         end
 
+        % prefix for this instance
         pre = [iname '.'];
 
         % bodies
@@ -340,10 +376,15 @@ end
 %% ---- mechanism-orchestration local functions (shared math lives in +smk/) ----
 
 %% index the module library: module_type -> definition file path
+% scan the module library for *.yaml files, parse each, and return a map of
+% module_type -> absolute file path. Skip any files that fail to parse.
 function idx = local_module_index(libDir)
+    % initialize an empty map
     idx = containers.Map('KeyType', 'char', 'ValueType', 'char');
     files = dir(fullfile(libDir, '*.yaml'));
+
     for i = 1:numel(files)
+        % fp is the absolute path to the module definition file
         fp = fullfile(libDir, files(i).name);
         try
             md = read_module_yaml(fp);
