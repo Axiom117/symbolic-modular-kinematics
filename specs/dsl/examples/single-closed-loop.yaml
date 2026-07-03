@@ -1,0 +1,70 @@
+# yaml-language-server: $schema=../../schema/mechanism-assembly.schema.yaml
+# 示例：单闭环机构（single_closed_loop）
+# 阶段 A.2.3 验证目标：闭环约束提取、未知量识别（L2 内部闭合的四杆环）。
+#
+# 结构：四杆环（four-bar loop）——四个 revolute Joint 作四个铰点，
+# 四个 Frame 立方体作四个连杆，首尾相连成环。最后一条连接闭合回路，标 closed:true。
+# 这是一个「在 L2 机构图内部即闭合」的回路，故用 DSL 连接级 closed 标记
+# （区别于 Manipulator–机构–Manipulator 经世界系闭合的 L3 回路，见 grammar.md §5.7）。
+#
+# 拓扑图（Mermaid）：
+#   graph LR
+#     frameA -->|faceX+ ~ linkA| jointAB
+#     jointAB -->|linkB ~ faceX-| frameB
+#     frameB -->|faceX+ ~ linkA| jointBC
+#     jointBC -->|linkB ~ faceX-| frameC
+#     frameC -->|faceX+ ~ linkA| jointCD
+#     jointCD -->|linkB ~ faceX-| frameD
+#     frameD -->|faceX+ ~ linkA| jointDA
+#     jointDA -.->|linkB ~ faceX- : closed| frameA
+#
+# 符号变量表（实例限定名）：
+#   jointAB.q, jointBC.q, jointCD.q, jointDA.q —— 四个铰点角度（rad，observable）
+# 四杆环 DOF = 1：4 个 revolute − 3 个独立平面闭环约束 = 1。切口分量与约束
+# 归零由 L3 与 A.4 DOF 分析决定，不在本 DSL 中声明。
+#
+# 说明：world 绑定、endFrame、known/unknown 分区均属 L3 execution-config。
+
+dsl_version: 0
+mechanism: single_closed_loop
+description: 四杆单闭环机构（4 Frame + 4 Joint 成环），用于验证回路识别与约束构造。
+module_library: ../../modules/
+
+instances:
+  frameA:
+    type: Frame
+    parameters:
+      cubeLength: 10
+  frameB:
+    type: Frame
+    parameters:
+      cubeLength: 10
+  frameC:
+    type: Frame
+    parameters:
+      cubeLength: 10
+  frameD:
+    type: Frame
+    parameters:
+      cubeLength: 10
+  jointAB:
+    type: Joint
+  jointBC:
+    type: Joint
+  jointCD:
+    type: Joint
+  jointDA:
+    type: Joint
+
+connections:
+  # 树边：A → B → C → D 依次串联
+  - ports: [frameA.faceX+, jointAB.linkA]
+  - ports: [jointAB.linkB, frameB.faceX-]
+  - ports: [frameB.faceX+, jointBC.linkA]
+  - ports: [jointBC.linkB, frameC.faceX-]
+  - ports: [frameC.faceX+, jointCD.linkA]
+  - ports: [jointCD.linkB, frameD.faceX-]
+  - ports: [frameD.faceX+, jointDA.linkA]
+  # 补边（chord）：jointDA 回接 frameA，闭合回路 → A.4 在此切开生成 constraint
+  - ports: [jointDA.linkB, frameA.faceX-]
+    closed: true

@@ -1,0 +1,139 @@
+# 机构装配 schema（阶段 A.2.1 / A.2.2）
+# Mechanism-assembly schema for the L2 DSL.
+#
+# 这是 JSON Schema，用于校验 specs/dsl/*.yaml 与 specs/dsl/examples/*.yaml
+# 中的机构装配（Mechanism，L2）DSL 文件。schema 严格遵循
+# ../modeling-conventions.md §9~§10、../conventions.yaml 与 ../dsl/grammar.md；
+# 凡冲突以 grammar.md 与约定文档为准。
+#
+# DSL 定位为 L2 纯拓扑（见 dsl/grammar.md §1）：只有 instances 与 connections。
+# world 绑定、endFrame、actuated、known/unknown 分区等 L3 执行语义一律不在本 schema 范围内。
+#
+# 本 schema 只覆盖「字段存在性 + 类型 + 正则」的静态结构。以下跨文件 / 跨数组语义
+# 由解释器校验（见 dsl/validation-checklist.md），schema 无法表达：
+#   - 实例 type 在模块库中存在
+#   - 端口引用的实例已声明、端口在模块中 exposed:true
+#   - 连接两端极性互补（socket↔plug）
+#   - 端口不重复占用
+#   - roll < symmetry
+#   - closed 连接确实闭合一个 L2 回路
+
+title: MechanismAssembly
+description: >-
+  单台机构（L2 Mechanism）的 DSL 装配定义。机构由若干模块实例（instances）
+  按端口连接（connections）组成。纯拓扑：不含任何 L3 执行语义。
+type: object
+additionalProperties: false
+
+required:
+  - dsl_version
+  - mechanism
+  - instances
+
+# ---------------------------------------------------------------------------
+# 复用定义
+# ---------------------------------------------------------------------------
+$defs:
+
+  mechanismName:
+    description: 机构名（UpperCamelCase 或 lowerCamelCase / snake_case 均可）。
+    type: string
+    pattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
+
+  instanceName:
+    description: >-
+      实例名，lowerCamelCase 或 snake_case，机构内唯一。不得与 L0 元件关键字
+      （body/frame/fixedTransform/joint/constraint/port）重名——该项由解释器校验。
+    type: string
+    pattern: "^[a-z][a-zA-Z0-9_]*$"
+
+  moduleType:
+    description: 引用的模块 module_type（UpperCamelCase；库内遗留名可含下划线，如 Pipette_body）。
+    type: string
+    pattern: "^[A-Z][A-Za-z0-9_]*$"
+
+  scalarOrExpr:
+    description: 实例参数值——数值或保留的符号表达式（如 cubeLength/2）；v0 禁止跨实例引用。
+    type: [number, string]
+
+  portRef:
+    description: >-
+      端口引用 "<instance>.<port>"。instance 为 lowerCamelCase/snake_case，
+      port 遵循 modeling-conventions.md §9.2（face[XYZ][+-] 或语义名）。
+    type: string
+    pattern: "^[a-z][a-zA-Z0-9_]*\\.(face[XYZ][+-]|[a-zA-Z][a-zA-Z0-9_]*)$"
+
+  instance:
+    description: 单个模块实例声明。
+    type: object
+    additionalProperties: false
+    required:
+      - type
+    properties:
+      type:
+        $ref: "#/$defs/moduleType"
+      parameters:
+        description: 实例参数赋值（对模块类参数）。v0 仅允许独立字面量，禁止跨实例引用。
+        type: object
+        additionalProperties:
+          $ref: "#/$defs/scalarOrExpr"
+
+  connection:
+    description: 单条端口连接。ports 顺序无关；父/子由极性推断（见 connection-semantics.md §2.2）。
+    type: object
+    additionalProperties: false
+    required:
+      - ports
+    properties:
+      ports:
+        description: 连接的两个端口引用；恰 2 个，顺序无关。
+        type: array
+        minItems: 2
+        maxItems: 2
+        items:
+          $ref: "#/$defs/portRef"
+      roll:
+        description: 离散装配滚转索引，实际角 = roll*360/symmetry 度。合法 0..symmetry-1（上界由解释器校验）。
+        type: integer
+        minimum: 0
+        default: 0
+      closed:
+        description: 是否为闭环补边（chord）。true 则 A.4 在此切开回路生成 constraint。
+        type: boolean
+        default: false
+
+# ---------------------------------------------------------------------------
+# 顶层字段
+# ---------------------------------------------------------------------------
+properties:
+
+  dsl_version:
+    description: DSL 语法版本；v0 恒为 0。
+    const: 0
+
+  mechanism:
+    description: 机构名。
+    $ref: "#/$defs/mechanismName"
+
+  description:
+    description: 人类可读描述。
+    type: string
+
+  module_library:
+    description: 模块库目录，缺省 ../modules/。
+    type: string
+
+  instances:
+    description: 模块实例声明映射（键为实例名，值为实例定义）；至少一个。
+    type: object
+    minProperties: 1
+    propertyNames:
+      $ref: "#/$defs/instanceName"
+    additionalProperties:
+      $ref: "#/$defs/instance"
+
+  connections:
+    description: 端口连接列表；单实例机构可为空或省略。
+    type: array
+    items:
+      $ref: "#/$defs/connection"

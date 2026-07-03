@@ -1,0 +1,59 @@
+# yaml-language-server: $schema=../../schema/mechanism-assembly.schema.yaml
+# 示例：开环 2R 链（open_chain_2r）
+# 阶段 A.2.3 验证目标：变换传播、端口拼接、FK 输出（纯树，无闭环）。
+#
+# 结构：两段串联 revolute 关节 + 工具末端。每个 Joint 的两端口均为 plug，
+# 必须贴到 Frame 的 socket 面上，故用 Frame 立方体作为串联枢纽（hub）。
+#
+# 拓扑图（Mermaid）：
+#   graph LR
+#     frame0 -->|faceX+ ~ linkA| joint1
+#     joint1 -->|linkB ~ faceX-| frame1
+#     frame1 -->|faceX+ ~ linkA| joint2
+#     joint2 -->|linkB ~ faceX-| frame2
+#     frame2 -->|faceZ+ ~ connector_side| pipette
+#
+# 符号变量表（实例限定名）：
+#   joint1.q   —— 第一转动副角度（rad，observable）
+#   joint2.q   —— 第二转动副角度（rad，observable）
+#   pipette.tip_origin —— 工具尖端任务系（observable，FK 输出候选）
+#
+# 说明：world 绑定（frame0 如何接地）、endFrame 指定（tip_origin）、
+# 关节 actuated 指派与 known/unknown 分区均属 L3 execution-config，不在本 DSL 中。
+
+dsl_version: 0
+mechanism: open_chain_2r
+description: 两段串联转动副加工具末端的开环链，用于验证变换传播与 FK 输出。
+module_library: ../../modules/
+
+instances:
+  frame0:
+    type: Frame
+    parameters:
+      cubeLength: 10
+  joint1:
+    type: Joint
+  frame1:
+    type: Frame
+    parameters:
+      cubeLength: 10
+  joint2:
+    type: Joint
+  frame2:
+    type: Frame
+    parameters:
+      cubeLength: 10
+  pipette:
+    type: Pipette_body
+    parameters:
+      tipDistance: 25
+
+connections:
+  # 第一段：frame0(socket) — joint1(plug)
+  - ports: [frame0.faceX+, joint1.linkA]
+  - ports: [joint1.linkB, frame1.faceX-]
+  # 第二段：frame1(socket) — joint2(plug)
+  - ports: [frame1.faceX+, joint2.linkA]
+  - ports: [joint2.linkB, frame2.faceX-]
+  # 工具末端：frame2(socket) — pipette(plug)
+  - ports: [frame2.faceZ+, pipette.connector_side]
