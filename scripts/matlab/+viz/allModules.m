@@ -7,10 +7,10 @@ function allModules(configYaml)
 %   so the whole L1 library can be checked in a single call.
 
     if nargin < 1 || isempty(configYaml)
-        configYaml = 'specs/modules/config/parameters.yaml';
+        configYaml = 'specs/modules/config/dimensions.yaml';
     end
-    here = fileparts(mfilename('fullpath'));
-    modDir = fullfile(here, '..', '..', '..', 'specs', 'modules');
+    here = fileparts(fileparts(mfilename('fullpath')));
+    modDir = fullfile(here, '..', '..', 'specs', 'modules');
     files = dir(fullfile(modDir, '*.yaml'));
     assert(~isempty(files), 'No module YAMLs found in %s', modDir);
 

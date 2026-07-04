@@ -31,7 +31,7 @@ function result = module(moduleYaml, configYaml)
     if nargin < 2; configYaml = ''; end
 
     % resolve a relative path against the current script's directory
-    here = fileparts(mfilename('fullpath'));
+    here = fileparts(fileparts(mfilename('fullpath')));
     moduleYaml = core.PathUtils.resolve(moduleYaml, here);
 
     m = core.readYaml(moduleYaml);

@@ -38,13 +38,15 @@ function result = mechanism(dslYaml, configYaml)
     end
     if nargin < 2; configYaml = ''; end
 
-    here = fileparts(mfilename('fullpath'));
+    here = fileparts(fileparts(mfilename('fullpath')));
 
     dslYaml = core.PathUtils.resolve(dslYaml, here);
     assert(exist(dslYaml, 'file') > 0, 'DSL file not found: %s', dslYaml);
 
     dsl = core.readYaml(dslYaml);
     assert(isfield(dsl, 'mechanism'), 'Not a mechanism assembly: %s', dslYaml);
+
+    % validate DSL version (currently only v0 is supported)
     ver = core.CommonUtils.field(dsl, 'dsl_version', 0);
     assert(isequal(ver, 0), 'Unsupported dsl_version %s (expected 0).', num2str(ver));
 
@@ -53,16 +55,14 @@ function result = mechanism(dslYaml, configYaml)
 
     libRel = core.CommonUtils.field(dsl, 'module_library', '../../modules/');
 
+    % module library absolute path
     libDir = core.PathUtils.resolve(libRel, dslDir);
     assert(exist(libDir, 'dir') > 0, 'Module library not found: %s', libRel);
 
-    % module_type -> file path
-    typeIndex = localModuleIndex(libDir);
-
     % load the module library's geometric parameter config (by module_type)
-    paramCfg = struct();
-    paramCfgPath = fullfile(libDir, 'config', 'parameters.yaml');
-    if exist(paramCfgPath, 'file'); paramCfg = core.readYaml(paramCfgPath); end
+    dimCfg = struct();
+    dimCfgPath = fullfile(libDir, 'config', 'dimensions.yaml');
+    if exist(dimCfgPath, 'file'); dimCfg = core.readYaml(dimCfgPath); end
 
     % load the mechanism config (by instance name) if provided
     mechCfg = struct();
@@ -104,7 +104,7 @@ function result = mechanism(dslYaml, configYaml)
         iname = instNames{i};
         itype = dsl.instances.(iname).type;
         [edges, groundNodes, inst(i)] = localExpandInstance(iname, itype, ...
-            typeIndex, libRel, defCache, paramCfg, mechOv, edges, pendingMap, groundNodes);
+            libDir, defCache, dimCfg, mechOv, edges, pendingMap, groundNodes);
     end
 
     % --- connections: mate socket->plug, insert bidirectional mate edges ---
@@ -278,20 +278,20 @@ end
 
 %% expand a single instance: load module def, inject params, expand bodies/frames/edges
 function [edges, groundNodes, inst_i] = localExpandInstance(iname, itype, ...
-        typeIndex, libRel, defCache, paramCfg, mechOv, edges, pendingMap, groundNodes)
+        libDir, defCache, dimCfg, mechOv, edges, pendingMap, groundNodes)
     if isKey(defCache, itype)
         md = defCache(itype);
     else
-        assert(isKey(typeIndex, itype), ...
-            'Instance "%s": module type "%s" not found in library %s.', ...
-            iname, itype, libRel);
-        md = core.readYaml(typeIndex(itype));
+        fp = fullfile(libDir, [itype '.yaml']);
+        assert(exist(fp, 'file') > 0, ...
+            'Instance "%s": module type "%s" not found in %s.', iname, itype, libDir);
+        md = core.readYaml(fp);
         defCache(itype) = md;
     end
 
     params = struct();
-    if isfield(paramCfg, matlab.lang.makeValidName(itype))
-        params = paramCfg.(matlab.lang.makeValidName(itype));
+    if isfield(dimCfg, matlab.lang.makeValidName(itype))
+        params = dimCfg.(matlab.lang.makeValidName(itype));
     end
 
     if isfield(mechOv, matlab.lang.makeValidName(iname))
@@ -356,30 +356,6 @@ function [edges, groundNodes, inst_i] = localExpandInstance(iname, itype, ...
 
     inst_i = struct('name', iname, 'type', itype, 'md', md, ...
         'bodies', {bList}, 'frames', {fList}, 'joints', {jList});
-end
-
-%% ---- mechanism-orchestration local functions (shared math lives in +smk/) ----
-
-%% index the module library: module_type -> definition file path
-% scan the module library for *.yaml files, parse each, and return a map of
-% module_type -> absolute file path. Skip any files that fail to parse.
-function idx = localModuleIndex(libDir)
-    % initialize an empty map
-    idx = containers.Map('KeyType', 'char', 'ValueType', 'char');
-    files = dir(fullfile(libDir, '*.yaml'));
-
-    for i = 1:numel(files)
-        % fp is the absolute path to the module definition file
-        fp = fullfile(libDir, files(i).name);
-        try
-            md = core.readYaml(fp);
-        catch
-            continue;
-        end
-        if isstruct(md) && isfield(md, 'module_type')
-            idx(md.module_type) = fp;
-        end
-    end
 end
 
 %% split an "instance.port" reference into its two parts (port may lack a dot only if malformed)
