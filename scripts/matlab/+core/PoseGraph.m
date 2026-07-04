@@ -10,7 +10,7 @@ classdef PoseGraph
         %   T = JOINT_TRANSFORM(KIND, AX, VAL)
         %     - revolute (default): pure rotation VAL (rad) about axis AX
         %     - prismatic:          pure translation VAL (mm) along axis AX
-        function T = joint_transform(kind, ax, val)
+        function T = jointTransform(kind, ax, val)
             if nargin < 1 || isempty(kind)
                 kind = 'revolute';
             end
@@ -22,9 +22,9 @@ classdef PoseGraph
                     else
                         d = ax(:) / n * val;
                     end
-                    T = smk.RigidBodyMath.T(eye(3), d);
+                    T = core.RigidBodyMath.T(eye(3), d);
                 otherwise  % revolute
-                    T = smk.RigidBodyMath.T(smk.RigidBodyMath.axang(ax, val), [0; 0; 0]);
+                    T = core.RigidBodyMath.T(core.RigidBodyMath.axang(ax, val), [0; 0; 0]);
             end
         end
 
@@ -35,7 +35,7 @@ classdef PoseGraph
         %
         %   POSES = PROPAGATE_POSES(EDGES, SEEDMAP)
         %     continuation form: caller supplies a pre-seeded pose map.
-        function poses = propagate_poses(edges, rootArg, rootPose)
+        function poses = propagatePoses(edges, rootArg, rootPose)
             if isa(rootArg, 'containers.Map')
                 poses = rootArg;
             else
@@ -56,7 +56,7 @@ classdef PoseGraph
         end
 
         %% check if a frame is pending (not yet frozen) based on the edges
-        function pend = frame_pending(edges, name)
+        function pend = framePending(edges, name)
             pend = false;
             for k = 1:numel(edges)
                 if strcmp(edges(k).to, name) && edges(k).pending

@@ -7,11 +7,11 @@ classdef VizHelpers
     methods (Static)
 
         %% import geometry into surface patch data, preferring the referenced file
-        function geom = import_geometry(geomPath)
+        function geom = importGeometry(geomPath)
             geom = [];
             [~, ~, ext] = fileparts(geomPath);
             if strcmpi(ext, '.stl')
-                geom = smk.VizHelpers.import_stl_geometry(geomPath);
+                geom = core.VizHelpers.importStlGeometry(geomPath);
                 return;
             end
             warning('viz_common:geometryUnsupported', ...
@@ -19,7 +19,7 @@ classdef VizHelpers
         end
 
         %% import an STL mesh into Vertices/Faces patch data
-        function geom = import_stl_geometry(stlPath)
+        function geom = importStlGeometry(stlPath)
             geom = [];
             if exist('stlread', 'file') ~= 2
                 warning('viz_common:stlImportUnavailable', ...
@@ -48,16 +48,16 @@ classdef VizHelpers
         end
 
         %% draw imported geometry at the origin of the given transformation matrix T
-        function patch_geometry(ax, T, geom, color, alpha)
+        function patchGeometry(ax, T, geom, color, alpha)
             Vw = (T(1:3,1:3) * geom.Vertices.' + T(1:3,4)).';
             patch(ax, 'Vertices', Vw, 'Faces', geom.Faces, 'FaceColor', color, ...
                 'FaceAlpha', alpha, 'EdgeColor', 'none', 'FaceLighting', 'gouraud', ...
                 'AmbientStrength', 0.35, 'DiffuseStrength', 0.75, 'SpecularStrength', 0.05);
-            smk.VizHelpers.draw_feature_edges(ax, Vw, geom.Faces, [0.75 0.75 0.75], 0.75);
+            core.VizHelpers.drawFeatureEdges(ax, Vw, geom.Faces, [0.75 0.75 0.75], 0.75);
         end
 
         %% draw only sharp feature edges so STL triangle mesh lines stay hidden
-        function draw_feature_edges(ax, vertices, faces, color, lineWidth)
+        function drawFeatureEdges(ax, vertices, faces, color, lineWidth)
             if size(faces, 2) ~= 3
                 return;
             end
@@ -77,7 +77,7 @@ classdef VizHelpers
         end
 
         %% color per module type (RGB)
-        function c = type_color(type)
+        function c = typeColor(type)
             switch type
                 case 'Frame';        c = [0.30 0.55 0.85];
                 case 'Joint';        c = [0.85 0.45 0.25];

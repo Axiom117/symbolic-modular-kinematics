@@ -7,7 +7,7 @@ classdef CommonUtils
 
         %% evaluate a scalar expression (string or number) into a numeric value
         %   Substitutes parameter names with their numeric values.
-        function x = eval_scalar(e, params)
+        function x = evalScalar(e, params)
             if isnumeric(e)
                 x = double(e);
                 return;
@@ -28,13 +28,13 @@ classdef CommonUtils
         end
 
         %% evaluate a vector expression (cell array or numeric) into a 3x1 vector
-        function v = eval_vec(arr, params)
+        function v = evalVec(arr, params)
             if ~iscell(arr)
                 arr = num2cell(arr);
             end
             v = zeros(3,1);
             for k = 1:min(3, numel(arr))
-                v(k) = smk.CommonUtils.eval_scalar(arr{k}, params);
+                v(k) = core.CommonUtils.evalScalar(arr{k}, params);
             end
         end
 
@@ -48,7 +48,7 @@ classdef CommonUtils
         end
 
         %% ensure the input is a cell array
-        function c = aslist(x)
+        function c = asList(x)
             if isempty(x)
                 c = {};
             elseif iscell(x)

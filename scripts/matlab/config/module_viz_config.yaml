@@ -1,5 +1,5 @@
 # 模块可视化参数注入配置
-# Parameter-injection config for visualize_module.m / visualize_all_modules.m.
+# Parameter-injection config for viz/module.m / viz/allModules.m.
 #
 # 按 module_type 分组。每组提供：
 #   - 模块类参数的数值（如 cubeLength、tipDistance），用于把符号平移

@@ -1,21 +1,21 @@
-function result = visualize_module(moduleYaml, configYaml)
-%VISUALIZE_MODULE  Validate & visualize one L1 module definition.
-%   VISUALIZE_MODULE(MODULEYAML) parses a module definition from
+function result = module(moduleYaml, configYaml)
+%MODULE  Validate & visualize one L1 module definition.
+%   MODULE(MODULEYAML) parses a module definition from
 %   specs/modules/*.yaml, builds its internal frame graph (body center
 %   frames + ports), evaluates all fixedTransform / joint edges, and draws:
 %     - each body as imported STEP geometry when available
 %     - each frame/port as an RGB coordinate triad (X=red, Y=green, Z=blue)
 %
-%   VISUALIZE_MODULE(MODULEYAML, CONFIGYAML) also injects numeric parameter
+%   MODULE(MODULEYAML, CONFIGYAML) also injects numeric parameter
 %   values (e.g. cubeLength, tipDistance) and joint variable values from a
 %   config YAML keyed by module_type, so symbolic translations like
 %   'cubeLength/2' and the revolute angle 'q' resolve to numbers.
 %
-%   RESULT = VISUALIZE_MODULE(...) returns a struct with the computed global
+%   RESULT = MODULE(...) returns a struct with the computed global
 %   pose of every frame (4x4), useful for headless checking.
 %
 %   Example:
-%     visualize_module('../../specs/modules/frame.yaml', 'module_viz_config.yaml')
+%     viz.module('../../specs/modules/frame.yaml', 'module_viz_config.yaml')
 %
 %   Rotation conventions follow specs/modeling-conventions.md:
 %     - align{a,b}: rule 's -> d' means child-frame axis 's' equals parent
@@ -25,16 +25,16 @@ function result = visualize_module(moduleYaml, configYaml)
 %     - pending => identity rotation, flagged in magenta (value not yet frozen).
 
     if nargin < 1 || isempty(moduleYaml)
-        error('visualize_module:usage', ...
-            'Usage: visualize_module(moduleYaml[, configYaml])');
+        error('viz:module:usage', ...
+            'Usage: viz.module(moduleYaml[, configYaml])');
     end
     if nargin < 2; configYaml = ''; end
 
     % resolve a relative path against the current script's directory
     here = fileparts(mfilename('fullpath'));
-    moduleYaml = smk.PathUtils.resolve(moduleYaml, here);
+    moduleYaml = core.PathUtils.resolve(moduleYaml, here);
 
-    m = read_module_yaml(moduleYaml);
+    m = core.readYaml(moduleYaml);
 
     % -- validate module definition ---
     assert(isfield(m, 'module_type'), 'Not a module definition: %s', moduleYaml);
@@ -42,9 +42,9 @@ function result = visualize_module(moduleYaml, configYaml)
     % --- parameter injection from config (keyed by module_type) ---
     params = struct();
     if ~isempty(configYaml)
-        configYaml = smk.PathUtils.resolve(configYaml, here);
+        configYaml = core.PathUtils.resolve(configYaml, here);
         if exist(configYaml, 'file')
-            cfg = read_module_yaml(configYaml);
+            cfg = core.readYaml(configYaml);
 
             % mtf = module_type field name (valid MATLAB identifier)
             mtf = matlab.lang.makeValidName(m.module_type);
@@ -58,10 +58,10 @@ function result = visualize_module(moduleYaml, configYaml)
     end
 
     % --- build edges & node poses ---
-    bodies = smk.CommonUtils.aslist(smk.CommonUtils.field(m, 'bodies', {}));
-    frames = smk.CommonUtils.aslist(smk.CommonUtils.field(m, 'frames', {}));
-    fts    = smk.CommonUtils.aslist(smk.CommonUtils.field(m, 'fixed_transforms', {}));
-    jts    = smk.CommonUtils.aslist(smk.CommonUtils.field(m, 'joints', {}));
+    bodies = core.CommonUtils.asList(core.CommonUtils.field(m, 'bodies', {}));
+    frames = core.CommonUtils.asList(core.CommonUtils.field(m, 'frames', {}));
+    fts    = core.CommonUtils.asList(core.CommonUtils.field(m, 'fixed_transforms', {}));
+    jts    = core.CommonUtils.asList(core.CommonUtils.field(m, 'joints', {}));
 
     % --- sanity check ---
     assert(~isempty(bodies), 'Module %s declares no bodies.', m.module_type);
@@ -75,12 +75,12 @@ function result = visualize_module(moduleYaml, configYaml)
         t = fts{k};
 
         % evaluate translation and rotation expressions into numeric values
-        tr = smk.CommonUtils.eval_vec(t.translation, params);
-        [R, pend] = smk.RigidBodyMath.rot(t.rotation, params);
+        tr = core.CommonUtils.evalVec(t.translation, params);
+        [R, pend] = core.RigidBodyMath.rot(t.rotation, params);
 
         % add an edge from the 'from_frame' to the 'to_frame' with the computed transformation matrix T, and mark if it's pending
         edges(end+1) = struct('from', t.from_frame, 'to', t.to_frame, ...
-            'T', smk.RigidBodyMath.T(R, tr), 'isJoint', false, 'pending', pend); %#ok<AGROW>
+            'T', core.RigidBodyMath.T(R, tr), 'isJoint', false, 'pending', pend); %#ok<AGROW>
     end
 
     % -- build edges from joints ---
@@ -88,12 +88,12 @@ function result = visualize_module(moduleYaml, configYaml)
         j = jts{k};
 
         % ax = joint axis vector, qv = joint variable value (e.g., angle for revolute)
-        ax = smk.CommonUtils.eval_vec(j.axis, params);
-        qv = smk.CommonUtils.field(params, j.variable, 0);
+        ax = core.CommonUtils.evalVec(j.axis, params);
+        qv = core.CommonUtils.field(params, j.variable, 0);
 
         % add an edge from the 'from_frame' to the 'to_frame' with the transformation matrix computed from the joint axis and variable, and mark it as a joint (not pending)
         edges(end+1) = struct('from', j.from_frame, 'to', j.to_frame, ...
-            'T', smk.RigidBodyMath.T(smk.RigidBodyMath.axang(ax, qv), [0;0;0]), ...
+            'T', core.RigidBodyMath.T(core.RigidBodyMath.axang(ax, qv), [0;0;0]), ...
             'isJoint', true, 'pending', false); %#ok<AGROW>
     end
 
@@ -101,7 +101,7 @@ function result = visualize_module(moduleYaml, configYaml)
     % root = first body's center frame at world origin; iterate the shared
     % propagation loop (see +smk/PoseGraph.m).
     rootBody = bodies{1}.name;
-    poses = smk.PoseGraph.propagate_poses(edges, rootBody, eye(4));
+    poses = core.PoseGraph.propagatePoses(edges, rootBody, eye(4));
 
     moduleDir = fileparts(moduleYaml);
     repoRoot = fileparts(fileparts(here));
@@ -130,7 +130,7 @@ function result = visualize_module(moduleYaml, configYaml)
     view(ax, 135, 25); xlabel(ax, 'X (mm)'); ylabel(ax, 'Y (mm)'); zlabel(ax, 'Z (mm)');
 
     % world frame
-    smk.VizHelpers.triad(ax, eye(4), L*1.3, 2.5, '-');
+    core.VizHelpers.triad(ax, eye(4), L*1.3, 2.5, '-');
     text(ax, 0, 0, 0, '  world', 'FontWeight', 'bold', 'Color', [.2 .2 .2]);
 
     % bodies as imported geometry when available
@@ -138,21 +138,21 @@ function result = visualize_module(moduleYaml, configYaml)
         b = bodies{k};
         if ~isKey(poses, b.name); continue; end
         Tb = poses(b.name);
-        geomSpec = smk.CommonUtils.field(b, 'geometry', '');
+        geomSpec = core.CommonUtils.field(b, 'geometry', '');
 
-        geomPath = smk.PathUtils.resolve_geometry_path(geomSpec, moduleDir, repoRoot);
+        geomPath = core.PathUtils.resolveGeometryPath(geomSpec, moduleDir, repoRoot);
         if isempty(geomSpec)
             % No body geometry: keep triads/labels only so pose checks still work.
         elseif isempty(geomPath)
-            warning('visualize_module:geometryMissing', ...
+            warning('viz:module:geometryMissing', ...
                 'Body "%s" geometry file not found: %s', b.name, b.geometry);
         else
-            geom = smk.VizHelpers.import_geometry(geomPath);
+            geom = core.VizHelpers.importGeometry(geomPath);
             if ~isempty(geom)
-                smk.VizHelpers.patch_geometry(ax, Tb, geom, [0.30 0.55 0.85], 0.12);
+                core.VizHelpers.patchGeometry(ax, Tb, geom, [0.30 0.55 0.85], 0.12);
             end
         end
-        smk.VizHelpers.triad(ax, Tb, L, 1.5, '-');
+        core.VizHelpers.triad(ax, Tb, L, 1.5, '-');
         text(ax, Tb(1,4), Tb(2,4), Tb(3,4), ...
             ['  ' b.name], 'FontAngle', 'italic', 'Color', [0.1 0.2 0.5]);
     end
@@ -161,7 +161,7 @@ function result = visualize_module(moduleYaml, configYaml)
     result.module_type = m.module_type;
     result.frames = struct();
     fprintf('\n=== %s (%d DOF, %s) ===\n', m.module_type, ...
-        smk.CommonUtils.field(m, 'dof', 0), smk.CommonUtils.field(m, 'extraction_status', 'n/a'));
+        core.CommonUtils.field(m, 'dof', 0), core.CommonUtils.field(m, 'extraction_status', 'n/a'));
 
     % get the names of all bodies for later checking of unreached bodies, where @(b) b.name is an anonymous function that extracts the 'name' field from each body struct, and 'UniformOutput', false allows the output to be a cell array of names
     bodyNames = cellfun(@(b) b.name, bodies, 'UniformOutput', false);
@@ -177,7 +177,7 @@ function result = visualize_module(moduleYaml, configYaml)
         T = poses(f.name);
         isPort = isfield(f, 'exposed') && isequal(f.exposed, true);
         
-        pend = smk.PoseGraph.frame_pending(edges, f.name);
+        pend = core.PoseGraph.framePending(edges, f.name);
 
         if pend
             color = [1 0 1]; lw = 2.0; mk = 'magenta';
@@ -187,17 +187,17 @@ function result = visualize_module(moduleYaml, configYaml)
             color = [0.4 0.4 0.4]; lw = 1.0; mk = 'frame';
         end
 
-        smk.VizHelpers.triad(ax, T, L, lw, smk.CommonUtils.tern(isPort, '-', '--'));
+        core.VizHelpers.triad(ax, T, L, lw, core.CommonUtils.tern(isPort, '-', '--'));
         plot3(ax, T(1,4), T(2,4), T(3,4), 'o', 'MarkerSize', 5, ...
             'MarkerFaceColor', color, 'MarkerEdgeColor', color);
         lbl = f.name; if pend; lbl = [lbl ' (pending R)']; end
         text(ax, T(1,4), T(2,4), T(3,4), ['  ' lbl], 'Color', color, ...
-            'FontWeight', smk.CommonUtils.tern(isPort, 'bold', 'normal'));
+            'FontWeight', core.CommonUtils.tern(isPort, 'bold', 'normal'));
         fn = matlab.lang.makeValidName(f.name);
         result.frames.(fn) = T;
         fprintf('  %-7s %-16s pos=[% 7.2f % 7.2f % 7.2f]  +Z=[% .2f % .2f % .2f]%s\n', ...
             mk, f.name, T(1,4), T(2,4), T(3,4), T(1,3), T(2,3), T(3,3), ...
-            smk.CommonUtils.tern(pend, '  <pending>', ''));
+            core.CommonUtils.tern(pend, '  <pending>', ''));
     end
 
     % unreached bodies note
@@ -208,7 +208,7 @@ function result = visualize_module(moduleYaml, configYaml)
     end
 
     title(ax, sprintf('%s  —  %d DOF, %s  (X=red Y=green Z=blue; magenta=pending)', ...
-        m.module_type, smk.CommonUtils.field(m, 'dof', 0), ...
-        smk.CommonUtils.field(m, 'extraction_status', 'n/a')), 'Interpreter', 'none');
+        m.module_type, core.CommonUtils.field(m, 'dof', 0), ...
+        core.CommonUtils.field(m, 'extraction_status', 'n/a')), 'Interpreter', 'none');
     rotate3d(ax, 'on');
 end

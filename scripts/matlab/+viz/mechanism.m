@@ -1,6 +1,6 @@
-function result = visualize_mechanism(dslYaml, configYaml)
-%VISUALIZE_MECHANISM  Validate & visualize a full modular mechanism assembly.
-%   VISUALIZE_MECHANISM(DSLYAML) parses a mechanism-assembly DSL file from
+function result = mechanism(dslYaml, configYaml)
+%MECHANISM  Validate & visualize a full modular mechanism assembly.
+%   MECHANISM(DSLYAML) parses a mechanism-assembly DSL file from
 %   specs/dsl/examples/*.yaml, loads every referenced L1 module definition
 %   from the module library, expands each instance's internal frame graph,
 %   mates instances port-to-port per the connections list, propagates global
@@ -11,68 +11,64 @@ function result = visualize_mechanism(dslYaml, configYaml)
 %       (zero-length when aligned; a visible gap reveals mis-mated ports)
 %     - each 1-DOF joint axis as a highlighted segment
 %
-%   VISUALIZE_MECHANISM(DSLYAML, CONFIGYAML) also injects per-instance joint
+%   MECHANISM(DSLYAML, CONFIGYAML) also injects per-instance joint
 %   variable values (revolute q, prismatic dx/dy/dz) from a config YAML keyed
 %   by mechanism name -> instance name -> variable. Unlisted joint variables
 %   default to 0 (zero pose). Geometric module parameters (cubeLength,
 %   tipDistance, ...) still come from <module_library>/config/parameters.yaml
 %   keyed by module_type.
 %
-%   RESULT = VISUALIZE_MECHANISM(...) returns a struct with the mechanism
+%   RESULT = MECHANISM(...) returns a struct with the mechanism
 %   name, the computed global pose map (frame name -> 4x4), and the list of
 %   any frames that could not be placed, useful for headless checking.
 %
 %   Example:
-%     visualize_mechanism('../../specs/dsl/examples/open-chain-2r.yaml', ...
-%                         'mechanism_viz_config.yaml')
+%     viz.mechanism('../../specs/dsl/examples/open-chain-2r.yaml', ...
+%                  'mechanism_viz_config.yaml')
 %
-%   Shared primitives (rotation/geometry/FK) live in scripts/matlab/+smk/
-%   and are reused verbatim from visualize_module.m. Mate convention follows
+%   Shared primitives (rotation/geometry/FK) live in scripts/matlab/+core/
+%   and are reused verbatim from viz.module. Mate convention follows
 %   specs/modeling-conventions.md and specs/dsl/connection-semantics.md:
 %     T_plug<-socket = Rz(roll*2*pi/symmetry) * Rx(pi),  t = 0.
 %   socket is the parent (Frame face / Manipulator dock); plug is the child.
 
     if nargin < 1 || isempty(dslYaml)
-        error('visualize_mechanism:usage', ...
-            'Usage: visualize_mechanism(dslYaml[, configYaml])');
+        error('viz:mechanism:usage', ...
+            'Usage: viz.mechanism(dslYaml[, configYaml])');
     end
     if nargin < 2; configYaml = ''; end
 
     here = fileparts(mfilename('fullpath'));
 
-    % dslYaml may be relative to this script; resolve to absolute path
-    dslYaml = smk.PathUtils.resolve(dslYaml, here);
+    dslYaml = core.PathUtils.resolve(dslYaml, here);
     assert(exist(dslYaml, 'file') > 0, 'DSL file not found: %s', dslYaml);
 
-    % parse dslYaml into a struct; validate top-level fields
-    dsl = read_module_yaml(dslYaml);
+    dsl = core.readYaml(dslYaml);
     assert(isfield(dsl, 'mechanism'), 'Not a mechanism assembly: %s', dslYaml);
-    ver = smk.CommonUtils.field(dsl, 'dsl_version', 0);
+    ver = core.CommonUtils.field(dsl, 'dsl_version', 0);
     assert(isequal(ver, 0), 'Unsupported dsl_version %s (expected 0).', num2str(ver));
 
     mechName = dsl.mechanism;
     dslDir = fileparts(dslYaml);
 
-    % find the module library relative to the DSL file
-    libRel = smk.CommonUtils.field(dsl, 'module_library', '../../modules/');
+    libRel = core.CommonUtils.field(dsl, 'module_library', '../../modules/');
 
-    % resolve to absolute path
-    libDir = smk.PathUtils.resolve(libRel, dslDir);
+    libDir = core.PathUtils.resolve(libRel, dslDir);
     assert(exist(libDir, 'dir') > 0, 'Module library not found: %s', libRel);
 
     % module_type -> file path
-    typeIndex = local_module_index(libDir);
+    typeIndex = localModuleIndex(libDir);
 
     % load the module library's geometric parameter config (by module_type)
     paramCfg = struct();
     paramCfgPath = fullfile(libDir, 'config', 'parameters.yaml');
-    if exist(paramCfgPath, 'file'); paramCfg = read_module_yaml(paramCfgPath); end
+    if exist(paramCfgPath, 'file'); paramCfg = core.readYaml(paramCfgPath); end
 
     % load the mechanism config (by instance name) if provided
     mechCfg = struct();
     if ~isempty(configYaml)
-        configYaml = smk.PathUtils.resolve(configYaml, here);
-        if exist(configYaml, 'file'); mechCfg = read_module_yaml(configYaml); end
+        configYaml = core.PathUtils.resolve(configYaml, here);
+        if exist(configYaml, 'file'); mechCfg = core.readYaml(configYaml); end
     end
 
     % per-instance joint overrides for this mechanism
@@ -107,22 +103,22 @@ function result = visualize_mechanism(dslYaml, configYaml)
     for i = 1:nInst
         iname = instNames{i};
         itype = dsl.instances.(iname).type;
-        [edges, groundNodes, inst(i)] = local_expand_instance(iname, itype, ...
+        [edges, groundNodes, inst(i)] = localExpandInstance(iname, itype, ...
             typeIndex, libRel, defCache, paramCfg, mechOv, edges, pendingMap, groundNodes);
     end
 
     % --- connections: mate socket->plug, insert bidirectional mate edges ---
-    conns = smk.CommonUtils.aslist(smk.CommonUtils.field(dsl, 'connections', {}));
+    conns = core.CommonUtils.asList(core.CommonUtils.field(dsl, 'connections', {}));
     connInfo = struct('socketNode', {}, 'plugNode', {}, 'closed', {}, 'label', {});
     for c = 1:numel(conns)
         cn = conns{c};
         assert(isfield(cn, 'ports') && numel(cn.ports) == 2, ...
             'Connection %d must list exactly two ports.', c);
         refA = cn.ports{1}; refB = cn.ports{2};
-        [ia, pa] = local_parse_port(refA);
-        [ib, pb] = local_parse_port(refB);
-        fa = local_lookup_frame(inst, ia, pa);
-        fb = local_lookup_frame(inst, ib, pb);
+        [ia, pa] = localParsePort(refA);
+        [ib, pb] = localParsePort(refB);
+        fa = localLookupFrame(inst, ia, pa);
+        fb = localLookupFrame(inst, ib, pb);
         assert(~isempty(fa), 'Connection %d: unknown port "%s".', c, refA);
         assert(~isempty(fb), 'Connection %d: unknown port "%s".', c, refB);
 
@@ -132,17 +128,17 @@ function result = visualize_mechanism(dslYaml, configYaml)
         elseif strcmp(polA, 'plug') && strcmp(polB, 'socket')
             sk = fb; pl = fa;
         else
-            error('visualize_mechanism:polarity', ...
+            error('viz:mechanism:polarity', ...
                 ['Connection %d [%s ~ %s]: expected one socket + one plug, ' ...
-                 'got "%s" + "%s".'], c, refA, refB, smk.CommonUtils.tern(isempty(polA), ...
-                 'none', polA), smk.CommonUtils.tern(isempty(polB), 'none', polB));
+                 'got "%s" + "%s".'], c, refA, refB, core.CommonUtils.tern(isempty(polA), ...
+                 'none', polA), core.CommonUtils.tern(isempty(polB), 'none', polB));
         end
 
-        roll = smk.CommonUtils.field(cn, 'roll', 0);
-        sym = smk.CommonUtils.field(sk, 'symmetry', 4);
+        roll = core.CommonUtils.field(cn, 'roll', 0);
+        sym = core.CommonUtils.field(sk, 'symmetry', 4);
         rollAngle = roll * 2 * pi / sym;
-        Tm = smk.RigidBodyMath.T(smk.RigidBodyMath.rotz(rollAngle) * smk.RigidBodyMath.rotx(pi), [0; 0; 0]);
-        isClosed = isequal(smk.CommonUtils.field(cn, 'closed', false), true);
+        Tm = core.RigidBodyMath.T(core.RigidBodyMath.rotz(rollAngle) * core.RigidBodyMath.rotx(pi), [0; 0; 0]);
+        isClosed = isequal(core.CommonUtils.field(cn, 'closed', false), true);
 
         % Only spanning-tree (non-chord) mates propagate poses. A chord edge
         % (closed:true) is the cut of a kinematic loop; using it for
@@ -152,7 +148,7 @@ function result = visualize_mechanism(dslYaml, configYaml)
         % mate gap correctly reports the loop-closure residual at this config.
         if ~isClosed
             edges(end+1) = struct('from', sk.node, 'to', pl.node, 'T', Tm); %#ok<AGROW>
-            edges(end+1) = struct('from', pl.node, 'to', sk.node, 'T', local_invT(Tm)); %#ok<AGROW>
+            edges(end+1) = struct('from', pl.node, 'to', sk.node, 'T', localInvT(Tm)); %#ok<AGROW>
         end
 
         connInfo(end+1) = struct('socketNode', sk.node, 'plugNode', pl.node, ...
@@ -167,7 +163,7 @@ function result = visualize_mechanism(dslYaml, configYaml)
     else
         seed(inst(1).bodies{1}.node) = eye(4);   % first body of first instance
     end
-    poses = smk.PoseGraph.propagate_poses(edges, seed);
+    poses = core.PoseGraph.propagatePoses(edges, seed);
 
     % --- characteristic scale ---
     maxr = 1; ks = keys(poses);
@@ -184,7 +180,7 @@ function result = visualize_mechanism(dslYaml, configYaml)
     title(ax, sprintf('%s  —  %d instances, %d connections  (X=red Y=green Z=blue)', ...
         mechName, nInst, numel(conns)), 'Interpreter', 'none');
 
-    smk.VizHelpers.triad(ax, eye(4), L * 1.4, 2.5, '-');
+    core.VizHelpers.triad(ax, eye(4), L * 1.4, 2.5, '-');
     text(ax, 0, 0, 0, '  world', 'FontWeight', 'bold', 'Color', [.2 .2 .2]);
 
     % --- bodies + frames per instance ---
@@ -195,19 +191,19 @@ function result = visualize_mechanism(dslYaml, configYaml)
         mechName, nInst, numel(conns));
 
     for i = 1:nInst
-        col = smk.VizHelpers.type_color(inst(i).type);
+        col = core.VizHelpers.typeColor(inst(i).type);
         fprintf('\n-- instance %s [%s] --\n', inst(i).name, inst(i).type);
 
         for k = 1:numel(inst(i).bodies)
             b = inst(i).bodies{k};
             if ~isKey(poses, b.node); unplaced{end+1} = b.node; continue; end %#ok<AGROW>
             Tb = poses(b.node);
-            geomPath = smk.PathUtils.resolve_geometry_path(b.geometry, moduleDir, repoRoot);
+            geomPath = core.PathUtils.resolveGeometryPath(b.geometry, moduleDir, repoRoot);
             if ~isempty(b.geometry) && ~isempty(geomPath)
-                geom = smk.VizHelpers.import_geometry(geomPath);
-                if ~isempty(geom); smk.VizHelpers.patch_geometry(ax, Tb, geom, col, 0.12); end
+                geom = core.VizHelpers.importGeometry(geomPath);
+                if ~isempty(geom); core.VizHelpers.patchGeometry(ax, Tb, geom, col, 0.12); end
             end
-            smk.VizHelpers.triad(ax, Tb, L, 1.2, '-');
+            core.VizHelpers.triad(ax, Tb, L, 1.2, '-');
         end
 
         for k = 1:numel(inst(i).frames)
@@ -226,16 +222,16 @@ function result = visualize_mechanism(dslYaml, configYaml)
             else
                 fc = [0.45 0.45 0.45]; lw = 1.0; sty = '--'; mk = 'frame';
             end
-            smk.VizHelpers.triad(ax, T, L, lw, sty);
+            core.VizHelpers.triad(ax, T, L, lw, sty);
             plot3(ax, T(1,4), T(2,4), T(3,4), 'o', 'MarkerSize', 5, ...
                 'MarkerFaceColor', fc, 'MarkerEdgeColor', fc);
             lbl = f.node; if pend; lbl = [lbl ' (pending R)']; end %#ok<AGROW>
             text(ax, T(1,4), T(2,4), T(3,4), ['  ' lbl], 'Color', fc, ...
-                'FontWeight', smk.CommonUtils.tern(f.exposed, 'bold', 'normal'), ...
+                'FontWeight', core.CommonUtils.tern(f.exposed, 'bold', 'normal'), ...
                 'Interpreter', 'none', 'FontSize', 8);
             fprintf('  %-7s %-22s pos=[% 7.2f % 7.2f % 7.2f]  +Z=[% .2f % .2f % .2f]%s\n', ...
                 mk, f.node, T(1,4), T(2,4), T(3,4), T(1,3), T(2,3), T(3,3), ...
-                smk.CommonUtils.tern(pend, '  <pending>', ''));
+                core.CommonUtils.tern(pend, '  <pending>', ''));
         end
 
         % joint axes
@@ -268,7 +264,7 @@ function result = visualize_mechanism(dslYaml, configYaml)
         line(ax, [Ps(1,4) Pp(1,4)], [Ps(2,4) Pp(2,4)], [Ps(3,4) Pp(3,4)], ...
             'Color', lc, 'LineWidth', lw, 'LineStyle', '--');
         fprintf('  %-40s gap=%.3e  Zdot=% .4f%s\n', ci.label, gap, zdot, ...
-            smk.CommonUtils.tern(ci.closed, '  [closed]', ''));
+            core.CommonUtils.tern(ci.closed, '  [closed]', ''));
     end
 
     if ~isempty(unplaced)
@@ -281,7 +277,7 @@ function result = visualize_mechanism(dslYaml, configYaml)
 end
 
 %% expand a single instance: load module def, inject params, expand bodies/frames/edges
-function [edges, groundNodes, inst_i] = local_expand_instance(iname, itype, ...
+function [edges, groundNodes, inst_i] = localExpandInstance(iname, itype, ...
         typeIndex, libRel, defCache, paramCfg, mechOv, edges, pendingMap, groundNodes)
     if isKey(defCache, itype)
         md = defCache(itype);
@@ -289,7 +285,7 @@ function [edges, groundNodes, inst_i] = local_expand_instance(iname, itype, ...
         assert(isKey(typeIndex, itype), ...
             'Instance "%s": module type "%s" not found in library %s.', ...
             iname, itype, libRel);
-        md = read_module_yaml(typeIndex(itype));
+        md = core.readYaml(typeIndex(itype));
         defCache(itype) = md;
     end
 
@@ -308,52 +304,52 @@ function [edges, groundNodes, inst_i] = local_expand_instance(iname, itype, ...
 
     pre = [iname '.'];
 
-    bodies = smk.CommonUtils.aslist(smk.CommonUtils.field(md, 'bodies', {}));
+    bodies = core.CommonUtils.asList(core.CommonUtils.field(md, 'bodies', {}));
     bList = cell(1, numel(bodies));
     for k = 1:numel(bodies)
         b = bodies{k};
         bList{k} = struct('node', [pre b.name], 'name', b.name, ...
-            'geometry', smk.CommonUtils.field(b, 'geometry', ''));
+            'geometry', core.CommonUtils.field(b, 'geometry', ''));
     end
 
-    frames = smk.CommonUtils.aslist(smk.CommonUtils.field(md, 'frames', {}));
+    frames = core.CommonUtils.asList(core.CommonUtils.field(md, 'frames', {}));
     fList = cell(1, numel(frames));
     for k = 1:numel(frames)
         f = frames{k};
         node = [pre f.name];
         fList{k} = struct('node', node, 'name', f.name, ...
             'exposed', isfield(f, 'exposed') && isequal(f.exposed, true), ...
-            'polarity', smk.CommonUtils.field(f, 'polarity', ''), ...
-            'semantic_tag', smk.CommonUtils.field(f, 'semantic_tag', ''), ...
-            'symmetry', smk.CommonUtils.field(f, 'symmetry', 4));
-        if strcmp(smk.CommonUtils.field(f, 'semantic_tag', ''), 'ground')
+            'polarity', core.CommonUtils.field(f, 'polarity', ''), ...
+            'semantic_tag', core.CommonUtils.field(f, 'semantic_tag', ''), ...
+            'symmetry', core.CommonUtils.field(f, 'symmetry', 4));
+        if strcmp(core.CommonUtils.field(f, 'semantic_tag', ''), 'ground')
             groundNodes{end+1} = node; %#ok<AGROW>
         end
     end
 
-    fts = smk.CommonUtils.aslist(smk.CommonUtils.field(md, 'fixed_transforms', {}));
+    fts = core.CommonUtils.asList(core.CommonUtils.field(md, 'fixed_transforms', {}));
     for k = 1:numel(fts)
         t = fts{k};
-        tr = smk.CommonUtils.eval_vec(t.translation, params);
-        [R, pend] = smk.RigidBodyMath.rot(t.rotation, params);
-        T = smk.RigidBodyMath.T(R, tr);
+        tr = core.CommonUtils.evalVec(t.translation, params);
+        [R, pend] = core.RigidBodyMath.rot(t.rotation, params);
+        T = core.RigidBodyMath.T(R, tr);
         fromN = [pre t.from_frame]; toN = [pre t.to_frame];
         edges(end+1) = struct('from', fromN, 'to', toN, 'T', T); %#ok<AGROW>
-        edges(end+1) = struct('from', toN, 'to', fromN, 'T', local_invT(T)); %#ok<AGROW>
+        edges(end+1) = struct('from', toN, 'to', fromN, 'T', localInvT(T)); %#ok<AGROW>
         if pend; pendingMap(toN) = true; end
     end
 
-    jts = smk.CommonUtils.aslist(smk.CommonUtils.field(md, 'joints', {}));
+    jts = core.CommonUtils.asList(core.CommonUtils.field(md, 'joints', {}));
     jList = cell(1, numel(jts));
     for k = 1:numel(jts)
         j = jts{k};
-        ax = smk.CommonUtils.eval_vec(j.axis, params);
-        val = smk.CommonUtils.field(params, j.variable, 0);
-        kind = smk.CommonUtils.field(j, 'kind', 'revolute');
-        T = smk.PoseGraph.joint_transform(kind, ax, val);
+        ax = core.CommonUtils.evalVec(j.axis, params);
+        val = core.CommonUtils.field(params, j.variable, 0);
+        kind = core.CommonUtils.field(j, 'kind', 'revolute');
+        T = core.PoseGraph.jointTransform(kind, ax, val);
         fromN = [pre j.from_frame]; toN = [pre j.to_frame];
         edges(end+1) = struct('from', fromN, 'to', toN, 'T', T); %#ok<AGROW>
-        edges(end+1) = struct('from', toN, 'to', fromN, 'T', local_invT(T)); %#ok<AGROW>
+        edges(end+1) = struct('from', toN, 'to', fromN, 'T', localInvT(T)); %#ok<AGROW>
         jList{k} = struct('node', fromN, 'axis', ax(:) / max(norm(ax), eps), ...
             'var', j.variable, 'val', val, 'kind', kind);
     end
@@ -367,7 +363,7 @@ end
 %% index the module library: module_type -> definition file path
 % scan the module library for *.yaml files, parse each, and return a map of
 % module_type -> absolute file path. Skip any files that fail to parse.
-function idx = local_module_index(libDir)
+function idx = localModuleIndex(libDir)
     % initialize an empty map
     idx = containers.Map('KeyType', 'char', 'ValueType', 'char');
     files = dir(fullfile(libDir, '*.yaml'));
@@ -376,7 +372,7 @@ function idx = local_module_index(libDir)
         % fp is the absolute path to the module definition file
         fp = fullfile(libDir, files(i).name);
         try
-            md = read_module_yaml(fp);
+            md = core.readYaml(fp);
         catch
             continue;
         end
@@ -387,7 +383,7 @@ function idx = local_module_index(libDir)
 end
 
 %% split an "instance.port" reference into its two parts (port may lack a dot only if malformed)
-function [instName, portName] = local_parse_port(ref)
+function [instName, portName] = localParsePort(ref)
     d = strfind(ref, '.');
     assert(~isempty(d), 'Malformed port reference "%s" (expected instance.port).', ref);
     instName = ref(1:d(1)-1);
@@ -395,7 +391,7 @@ function [instName, portName] = local_parse_port(ref)
 end
 
 %% find the recorded frame struct for instance/port; [] if absent
-function f = local_lookup_frame(inst, instName, portName)
+function f = localLookupFrame(inst, instName, portName)
     f = [];
     for i = 1:numel(inst)
         if ~strcmp(inst(i).name, instName); continue; end
@@ -406,7 +402,7 @@ function f = local_lookup_frame(inst, instName, portName)
 end
 
 %% inverse of a homogeneous (rigid) transform
-function Ti = local_invT(T)
+function Ti = localInvT(T)
     R = T(1:3,1:3); t = T(1:3,4);
     Ti = eye(4); Ti(1:3,1:3) = R'; Ti(1:3,4) = -R' * t;
 end

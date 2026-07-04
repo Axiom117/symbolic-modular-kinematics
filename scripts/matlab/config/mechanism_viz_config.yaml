@@ -1,5 +1,5 @@
 # 机构装配可视化配置（阶段 A.2.5）
-# Per-mechanism, per-instance joint-variable overrides for visualize_mechanism.m.
+# Per-mechanism, per-instance joint-variable overrides for viz/mechanism.m.
 #
 # 结构：mechanism 名 → 实例名 → 关节变量取值映射。
 #   顶层键 = DSL 的 mechanism 字段（如 open_chain_2r）。

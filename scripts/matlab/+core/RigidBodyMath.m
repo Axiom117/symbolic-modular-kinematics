@@ -44,7 +44,7 @@ classdef RigidBodyMath
         end
 
         %% convert a string like 'X', '-Y', 'Z' into a 3x1 axis vector
-        function v = axis_str(tok)
+        function v = axisStr(tok)
             s = 1;
             if tok(1) == '-'
                 s = -1;
@@ -60,10 +60,10 @@ classdef RigidBodyMath
         %% evaluate an alignment struct into a numeric 3x3 rotation matrix
         %   s = source axis from child frame, d = destination axis in parent frame
         function R = align(al)
-            s0 = smk.RigidBodyMath.axis_str(al.a{1});
-            d0 = smk.RigidBodyMath.axis_str(al.a{2});
-            s1 = smk.RigidBodyMath.axis_str(al.b{1});
-            d1 = smk.RigidBodyMath.axis_str(al.b{2});
+            s0 = core.RigidBodyMath.axisStr(al.a{1});
+            d0 = core.RigidBodyMath.axisStr(al.a{2});
+            s1 = core.RigidBodyMath.axisStr(al.b{1});
+            d1 = core.RigidBodyMath.axisStr(al.b{2});
             SRC = [s0 s1 cross(s0, s1)];
             DST = [d0 d1 cross(d0, d1)];
             R = DST * SRC.';   % SRC orthonormal => inv = transpose
@@ -80,20 +80,20 @@ classdef RigidBodyMath
                 return;
             end
             if isfield(rot_struct, 'align')
-                R = smk.RigidBodyMath.align(rot_struct.align);
+                R = core.RigidBodyMath.align(rot_struct.align);
             elseif isfield(rot_struct, 'pending')
                 R = eye(3);
                 pending = true;
             elseif isfield(rot_struct, 'rpy')
                 r = rot_struct.rpy;
-                rx = smk.CommonUtils.eval_scalar(r{1}, params);
-                ry = smk.CommonUtils.eval_scalar(r{2}, params);
-                rz = smk.CommonUtils.eval_scalar(r{3}, params);
-                R = smk.RigidBodyMath.rotz(rz) * smk.RigidBodyMath.roty(ry) * smk.RigidBodyMath.rotx(rx);
+                rx = core.CommonUtils.evalScalar(r{1}, params);
+                ry = core.CommonUtils.evalScalar(r{2}, params);
+                rz = core.CommonUtils.evalScalar(r{3}, params);
+                R = core.RigidBodyMath.rotz(rz) * core.RigidBodyMath.roty(ry) * core.RigidBodyMath.rotx(rx);
             elseif isfield(rot_struct, 'axis_angle')
-                om = smk.CommonUtils.eval_vec(rot_struct.axis_angle.omega, params);
-                q  = smk.CommonUtils.eval_scalar(rot_struct.axis_angle.q, params);
-                R = smk.RigidBodyMath.axang(om, q);
+                om = core.CommonUtils.evalVec(rot_struct.axis_angle.omega, params);
+                q  = core.CommonUtils.evalScalar(rot_struct.axis_angle.q, params);
+                R = core.RigidBodyMath.axang(om, q);
             else
                 R = eye(3);
             end

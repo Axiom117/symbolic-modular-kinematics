@@ -7,10 +7,12 @@
 
 | 文件 | 作用 |
 |------|------|
-| `read_module_yaml.m` | 极简 YAML 子集解析器（已对照 PyYAML 验证，逐文件一致） |
-| `visualize_module.m` | 解析单个模块 → 求解坐标系位姿 → 画三元轴 + 优先加载 body STEP 几何 |
-| `visualize_all_modules.m` | 批量跑完 `specs/modules/` 下全部模块 |
-| `module_viz_config.yaml` | 参数注入配置（按 `module_type` 提供 `cubeLength`/`tipDistance`/关节角等） |
+| `+core/readYaml.m` | 极简 YAML 子集解析器（已对照 PyYAML 验证，逐文件一致） |
+| `+viz/module.m` | 解析单个模块 → 求解坐标系位姿 → 画三元轴 + 优先加载 body STEP 几何 |
+| `+viz/allModules.m` | 批量跑完 `specs/modules/` 下全部模块 |
+| `+viz/mechanism.m` | 解析机构装配 DSL → 多实例拼接 → 全局 FK → 可视化 |
+| `+core/` | 核心库：数学(RigidBodyMath)、FK(PoseGraph)、可视化辅助(VizHelpers)、工具(CommonUtils/PathUtils) |
+| `config/` | 参数注入配置（`mechanism_viz_config.yaml` / `module_viz_config.yaml`） |
 
 ## 用法
 
@@ -18,16 +20,16 @@
 
 ```matlab
 % 单个模块（带参数注入）
-visualize_module('../../specs/modules/frame.yaml', 'module_viz_config.yaml');
+viz.module('../../specs/modules/frame.yaml', 'module_viz_config.yaml');
 
 % 不注入参数：仅当模块平移无符号量时可行，否则会报未解析符号错误
-visualize_module('../../specs/modules/pin.yaml');
+viz.module('../../specs/modules/pin.yaml');
 
 % 一次性校验全部模块
-visualize_all_modules();
+viz.allModules();
 
 % 取回数值结果（每个 frame 的 4x4 全局位姿）做无图检查
-r = visualize_module('../../specs/modules/joint.yaml', 'module_viz_config.yaml');
+r = viz.module('../../specs/modules/joint.yaml', 'module_viz_config.yaml');
 disp(r.frames.linkB);
 ```
 
@@ -69,9 +71,9 @@ disp(r.frames.linkB);
 
 ## warning 行为
 
-- 缺失文件：发出 `visualize_module:geometryMissing` warning。
-- 缺少可用导入 API：发出 `visualize_module:geometryImportUnavailable` warning。
-- 文件存在但导入/网格化失败：发出 `visualize_module:geometryImportFailed` warning。
+- 缺失文件：发出 `viz:module:geometryMissing` warning。
+- 缺少可用导入 API：发出 `viz:module:geometryImportUnavailable` warning。
+- 文件存在但导入/网格化失败：发出 `viz:module:geometryImportFailed` warning。
 - 上述 warning 都不会中断整次可视化；frame/port 报告仍会继续输出。
 
 ## 局限

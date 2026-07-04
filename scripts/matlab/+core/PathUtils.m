@@ -17,13 +17,13 @@ classdef PathUtils
         end
 
         %% resolve a body geometry path independent of the current working directory
-        function p = resolve_geometry_path(geomPath, moduleDir, repoRoot)
+        function p = resolveGeometryPath(geomPath, moduleDir, repoRoot)
             p = '';
             if isempty(geomPath)
                 return;
             end
             candidates = {};
-            if smk.PathUtils.is_absolute_path(geomPath)
+            if core.PathUtils.isAbsolutePath(geomPath)
                 candidates{end+1} = geomPath; %#ok<AGROW>
             else
                 if startsWith(strrep(geomPath, '\', '/'), 'assets/')
@@ -33,7 +33,7 @@ classdef PathUtils
                 candidates{end+1} = fullfile(repoRoot, geomPath); %#ok<AGROW>
             end
             for k = 1:numel(candidates)
-                cand = smk.PathUtils.find_case_insensitive_file(candidates{k});
+                cand = core.PathUtils.findCaseInsensitiveFile(candidates{k});
                 if ~isempty(cand)
                     p = cand;
                     return;
@@ -42,7 +42,7 @@ classdef PathUtils
         end
 
         %% find a file, tolerating case-only filename mismatches (e.g. .STEP vs .step)
-        function p = find_case_insensitive_file(pathStr)
+        function p = findCaseInsensitiveFile(pathStr)
             p = '';
             if exist(pathStr, 'file')
                 p = pathStr;
@@ -64,7 +64,7 @@ classdef PathUtils
         end
 
         %% detect whether a path string is absolute on the current platform
-        function tf = is_absolute_path(p)
+        function tf = isAbsolutePath(p)
             if isempty(p)
                 tf = false;
             elseif ispc

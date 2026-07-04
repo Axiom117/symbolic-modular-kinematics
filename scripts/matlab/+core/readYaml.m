@@ -1,8 +1,8 @@
-function data = read_module_yaml(path)
-%READ_MODULE_YAML  Minimal YAML reader for this project's module/config files.
-%   DATA = READ_MODULE_YAML(PATH) parses the constrained YAML subset used by
-%   specs/modules/*.yaml and the visualization config, returning nested
-%   struct (mappings) / cell (sequences) / scalar (double|logical|char).
+function data = readYaml(path)
+%READ_YAML  Minimal YAML reader for this project's DSL/module/config files.
+%   DATA = READ_YAML(PATH) parses the constrained YAML subset used across
+%   this project, returning nested struct (mappings) / cell (sequences) /
+%   scalar (double|logical|char).
 %
 %   Supported subset (sufficient for the L1 module library, no external deps):
 %     - block mappings (key: value) nested by indentation
