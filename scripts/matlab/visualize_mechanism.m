@@ -98,110 +98,17 @@ function result = visualize_mechanism(dslYaml, configYaml)
     % cache module definitions by type to avoid re-reading the same YAML file
     defCache = containers.Map('KeyType', 'char', 'ValueType', 'any');
 
-    % initialize instance structures
     inst = struct('name', {}, 'type', {}, 'md', {}, 'bodies', {}, ...
         'frames', {}, 'joints', {});
     
     % record all frames marked as "ground" for seeding the FK pose propagation
     groundNodes = {};
 
-    % iterate instances: load defs, inject params, expand internal graph
     for i = 1:nInst
         iname = instNames{i};
-
-        % instance type is the module_type of the referenced module definition
         itype = dsl.instances.(iname).type;
-
-        if isKey(defCache, itype)
-            md = defCache(itype);
-        else
-            assert(isKey(typeIndex, itype), ...
-                'Instance "%s": module type "%s" not found in library %s.', ...
-                iname, itype, libRel);
-
-            % read module definition YAML file
-            md = read_module_yaml(typeIndex(itype));
-
-            % cache the module definition for future instances of this type
-            defCache(itype) = md;
-        end
-
-        % params = geometric params (by module_type) + joint overrides (by instance)
-        params = struct();
-        tf = matlab.lang.makeValidName(itype);
-        if isfield(paramCfg, tf) && isstruct(paramCfg.(tf)); params = paramCfg.(tf); end
-
-        % joint overrides for this instance (from the mechanism config)    
-        inf = matlab.lang.makeValidName(iname);
-
-        % check for joint variable overrides in the mechanism config for this instance
-        if isfield(mechOv, inf) && isstruct(mechOv.(inf))
-            % ov: joint variable overrides for this instance; ofn: joint variable names
-            ov = mechOv.(inf); ofn = fieldnames(ov);
-
-            % override any joint variables in the module definition with the mechanism config
-            for q = 1:numel(ofn); params.(ofn{q}) = ov.(ofn{q}); end
-        end
-
-        % prefix for this instance
-        pre = [iname '.'];
-
-        % bodies
-        bodies = smk.CommonUtils.aslist(smk.CommonUtils.field(md, 'bodies', {}));
-        bList = cell(1, numel(bodies));
-        for k = 1:numel(bodies)
-            b = bodies{k};
-            bList{k} = struct('node', [pre b.name], 'name', b.name, ...
-                'geometry', smk.CommonUtils.field(b, 'geometry', ''));
-        end
-
-        % frames (record polarity/exposed/tag for mating + rendering)
-        frames = smk.CommonUtils.aslist(smk.CommonUtils.field(md, 'frames', {}));
-        fList = cell(1, numel(frames));
-        for k = 1:numel(frames)
-            f = frames{k};
-            node = [pre f.name];
-            fList{k} = struct('node', node, 'name', f.name, ...
-                'exposed', isfield(f, 'exposed') && isequal(f.exposed, true), ...
-                'polarity', smk.CommonUtils.field(f, 'polarity', ''), ...
-                'semantic_tag', smk.CommonUtils.field(f, 'semantic_tag', ''), ...
-                'symmetry', smk.CommonUtils.field(f, 'symmetry', 4));
-            if strcmp(smk.CommonUtils.field(f, 'semantic_tag', ''), 'ground')
-                groundNodes{end+1} = node; %#ok<AGROW>
-            end
-        end
-
-        % internal fixed-transform edges (bidirectional)
-        fts = smk.CommonUtils.aslist(smk.CommonUtils.field(md, 'fixed_transforms', {}));
-        for k = 1:numel(fts)
-            t = fts{k};
-            tr = smk.CommonUtils.eval_vec(t.translation, params);
-            [R, pend] = smk.RigidBodyMath.rot(t.rotation, params);
-            T = smk.RigidBodyMath.T(R, tr);
-            fromN = [pre t.from_frame]; toN = [pre t.to_frame];
-            edges(end+1) = struct('from', fromN, 'to', toN, 'T', T); %#ok<AGROW>
-            edges(end+1) = struct('from', toN, 'to', fromN, 'T', local_invT(T)); %#ok<AGROW>
-            if pend; pendingMap(toN) = true; end
-        end
-
-        % internal joint edges (kind-aware, bidirectional)
-        jts = smk.CommonUtils.aslist(smk.CommonUtils.field(md, 'joints', {}));
-        jList = cell(1, numel(jts));
-        for k = 1:numel(jts)
-            j = jts{k};
-            ax = smk.CommonUtils.eval_vec(j.axis, params);
-            val = smk.CommonUtils.field(params, j.variable, 0);
-            kind = smk.CommonUtils.field(j, 'kind', 'revolute');
-            T = smk.PoseGraph.joint_transform(kind, ax, val);
-            fromN = [pre j.from_frame]; toN = [pre j.to_frame];
-            edges(end+1) = struct('from', fromN, 'to', toN, 'T', T); %#ok<AGROW>
-            edges(end+1) = struct('from', toN, 'to', fromN, 'T', local_invT(T)); %#ok<AGROW>
-            jList{k} = struct('node', fromN, 'axis', ax(:) / max(norm(ax), eps), ...
-                'var', j.variable, 'val', val, 'kind', kind);
-        end
-
-        inst(i) = struct('name', iname, 'type', itype, 'md', md, ...
-            'bodies', {bList}, 'frames', {fList}, 'joints', {jList});
+        [edges, groundNodes, inst(i)] = local_expand_instance(iname, itype, ...
+            typeIndex, libRel, defCache, paramCfg, mechOv, edges, pendingMap, groundNodes);
     end
 
     % --- connections: mate socket->plug, insert bidirectional mate edges ---
@@ -371,6 +278,88 @@ function result = visualize_mechanism(dslYaml, configYaml)
     result.unplaced = unplaced;
 
     rotate3d(ax, 'on');
+end
+
+%% expand a single instance: load module def, inject params, expand bodies/frames/edges
+function [edges, groundNodes, inst_i] = local_expand_instance(iname, itype, ...
+        typeIndex, libRel, defCache, paramCfg, mechOv, edges, pendingMap, groundNodes)
+    if isKey(defCache, itype)
+        md = defCache(itype);
+    else
+        assert(isKey(typeIndex, itype), ...
+            'Instance "%s": module type "%s" not found in library %s.', ...
+            iname, itype, libRel);
+        md = read_module_yaml(typeIndex(itype));
+        defCache(itype) = md;
+    end
+
+    params = struct();
+    if isfield(paramCfg, matlab.lang.makeValidName(itype))
+        params = paramCfg.(matlab.lang.makeValidName(itype));
+    end
+
+    if isfield(mechOv, matlab.lang.makeValidName(iname))
+        ov = mechOv.(matlab.lang.makeValidName(iname));
+        if isstruct(ov)
+            ofn = fieldnames(ov);
+            for q = 1:numel(ofn); params.(ofn{q}) = ov.(ofn{q}); end
+        end
+    end
+
+    pre = [iname '.'];
+
+    bodies = smk.CommonUtils.aslist(smk.CommonUtils.field(md, 'bodies', {}));
+    bList = cell(1, numel(bodies));
+    for k = 1:numel(bodies)
+        b = bodies{k};
+        bList{k} = struct('node', [pre b.name], 'name', b.name, ...
+            'geometry', smk.CommonUtils.field(b, 'geometry', ''));
+    end
+
+    frames = smk.CommonUtils.aslist(smk.CommonUtils.field(md, 'frames', {}));
+    fList = cell(1, numel(frames));
+    for k = 1:numel(frames)
+        f = frames{k};
+        node = [pre f.name];
+        fList{k} = struct('node', node, 'name', f.name, ...
+            'exposed', isfield(f, 'exposed') && isequal(f.exposed, true), ...
+            'polarity', smk.CommonUtils.field(f, 'polarity', ''), ...
+            'semantic_tag', smk.CommonUtils.field(f, 'semantic_tag', ''), ...
+            'symmetry', smk.CommonUtils.field(f, 'symmetry', 4));
+        if strcmp(smk.CommonUtils.field(f, 'semantic_tag', ''), 'ground')
+            groundNodes{end+1} = node; %#ok<AGROW>
+        end
+    end
+
+    fts = smk.CommonUtils.aslist(smk.CommonUtils.field(md, 'fixed_transforms', {}));
+    for k = 1:numel(fts)
+        t = fts{k};
+        tr = smk.CommonUtils.eval_vec(t.translation, params);
+        [R, pend] = smk.RigidBodyMath.rot(t.rotation, params);
+        T = smk.RigidBodyMath.T(R, tr);
+        fromN = [pre t.from_frame]; toN = [pre t.to_frame];
+        edges(end+1) = struct('from', fromN, 'to', toN, 'T', T); %#ok<AGROW>
+        edges(end+1) = struct('from', toN, 'to', fromN, 'T', local_invT(T)); %#ok<AGROW>
+        if pend; pendingMap(toN) = true; end
+    end
+
+    jts = smk.CommonUtils.aslist(smk.CommonUtils.field(md, 'joints', {}));
+    jList = cell(1, numel(jts));
+    for k = 1:numel(jts)
+        j = jts{k};
+        ax = smk.CommonUtils.eval_vec(j.axis, params);
+        val = smk.CommonUtils.field(params, j.variable, 0);
+        kind = smk.CommonUtils.field(j, 'kind', 'revolute');
+        T = smk.PoseGraph.joint_transform(kind, ax, val);
+        fromN = [pre j.from_frame]; toN = [pre j.to_frame];
+        edges(end+1) = struct('from', fromN, 'to', toN, 'T', T); %#ok<AGROW>
+        edges(end+1) = struct('from', toN, 'to', fromN, 'T', local_invT(T)); %#ok<AGROW>
+        jList{k} = struct('node', fromN, 'axis', ax(:) / max(norm(ax), eps), ...
+            'var', j.variable, 'val', val, 'kind', kind);
+    end
+
+    inst_i = struct('name', iname, 'type', itype, 'md', md, ...
+        'bodies', {bList}, 'frames', {fList}, 'joints', {jList});
 end
 
 %% ---- mechanism-orchestration local functions (shared math lives in +smk/) ----
