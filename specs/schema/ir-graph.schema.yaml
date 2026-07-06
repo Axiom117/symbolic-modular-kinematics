@@ -1,0 +1,162 @@
+# IR 图 schema（阶段 A.3.1）
+# Schema for the Intermediate Representation (IR) graph produced by
+# ir.Expander after full DSL→IR expansion.
+#
+# 这是 JSON Schema，用于校验 IR 图的结构完整性。
+# 基于 EdgeGraph.toStruct() 输出格式 + Expander.Instances struct 结构编写。
+# 严格遵循 ir/node-types.md 与 ir/edge-types.md；凡冲突以节点/边规范为准。
+#
+# 注意：IR 图是 MATLAB 内部数据结构，本 schema 用于概念校验与文档化，
+# 不直接校验 MATLAB struct。4×4 矩阵在 JSON 中表示为 4×4 number 数组。
+
+title: IRGraph
+description: >-
+  展开后的 IR 图，包含所有节点（body + frame）、所有边（fixed / joint / mate / closed_mate）
+  以及 ground 节点列表。
+type: object
+additionalProperties: false
+
+required:
+  - nodes
+  - edges
+  - groundNodes
+
+properties:
+  nodes:
+    description: IR 图节点集合。
+    type: object
+    additionalProperties: false
+    required: [bodies, frames]
+    properties:
+      bodies:
+        description: Body 节点列表。每个 body 是几何载体，隐含中心坐标系。
+        type: array
+        items:
+          $ref: "#/$defs/body"
+
+      frames:
+        description: Frame 节点列表。exposed:true 即为端口（Port）。
+        type: array
+        items:
+          $ref: "#/$defs/frame"
+
+  edges:
+    description: IR 图有向边集合。
+    type: object
+    additionalProperties: false
+    required: [fixed, joint, mate, closed_mate]
+    properties:
+      fixed:
+        description: 固定刚体变换边（双向，kind=fixed）。
+        type: array
+        items:
+          $ref: "#/$defs/edge"
+
+      joint:
+        description: 关节自由度边（双向，kind=joint）。
+        type: array
+        items:
+          $ref: "#/$defs/edge"
+
+      mate:
+        description: 生成树 mate 边（双向，kind=mate，参与 FK 传播）。
+        type: array
+        items:
+          $ref: "#/$defs/edge"
+
+      closed_mate:
+        description: 闭环弦边（单向，kind=closed_mate，不参与 FK 传播，诊断专用）。
+        type: array
+        items:
+          $ref: "#/$defs/edge"
+
+  groundNodes:
+    description: 绑定到世界原点（T=eye(4)）的节点名列表。
+    type: array
+    items:
+      type: string
+      description: 实例限定名，如 "manipulator.ground" 或 "frame0.body"。
+
+# ---------------------------------------------------------------------------
+# 复用定义
+# ---------------------------------------------------------------------------
+$defs:
+
+  instanceQualifiedName:
+    description: 实例限定名，格式 instanceName.elementName（点号分隔）。
+    type: string
+    pattern: "^[a-zA-Z][a-zA-Z0-9_]*\\.[a-zA-Z][a-zA-Z0-9_]*$"
+
+  body:
+    description: Body 节点——几何载体，含隐含中心坐标系。
+    type: object
+    additionalProperties: false
+    required: [node, name]
+    properties:
+      node:
+        $ref: "#/$defs/instanceQualifiedName"
+      name:
+        description: 模块定义中的原始 body 名（无实例前缀）。
+        type: string
+      geometry:
+        description: STEP/STL 几何文件相对路径；空字符串表示无几何。
+        type: string
+        default: ""
+
+  frame:
+    description: Frame 节点——坐标系；exposed:true 即为对外端口（Port）。
+    type: object
+    additionalProperties: false
+    required: [node, name, exposed]
+    properties:
+      node:
+        $ref: "#/$defs/instanceQualifiedName"
+      name:
+        description: 模块定义中的原始 frame 名（无实例前缀）。
+        type: string
+      exposed:
+        description: 是否对外暴露为端口（Port）。
+        type: boolean
+      polarity:
+        description: 端口极性。仅 exposed:true 时有意义。
+        type: string
+        enum: [socket, plug, ""]
+        default: ""
+      semantic_tag:
+        description: 语义标签。'ground' 表示绑定世界原点。
+        type: string
+        enum: [ground, joint_side, connector, tool, dock, ""]
+        default: ""
+      symmetry:
+        description: 绕 +Z 的旋转对称阶；约束连接 roll 取值 0..symmetry-1。
+        type: integer
+        minimum: 1
+        default: 4
+
+  edge:
+    description: IR 图有向边。
+    type: object
+    additionalProperties: false
+    required: [from, to, T, kind]
+    properties:
+      from:
+        description: 源节点名（实例限定名）。
+        $ref: "#/$defs/instanceQualifiedName"
+      to:
+        description: 目标节点名（实例限定名）。
+        $ref: "#/$defs/instanceQualifiedName"
+      T:
+        description: 4×4 齐次变换矩阵，pose(to) = pose(from) * T。
+        type: array
+        minItems: 4
+        maxItems: 4
+        items:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items:
+            type: number
+      kind:
+        description: 边类型枚举。
+        type: string
+        enum: [fixed, joint, mate, closed_mate]
