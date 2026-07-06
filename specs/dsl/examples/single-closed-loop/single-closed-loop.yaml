@@ -28,7 +28,7 @@
 dsl_version: 0
 mechanism: single_closed_loop
 description: 四杆单闭环机构（4 Frame + 4 Joint 成环），用于验证回路识别与约束构造。
-module_library: ../../modules/
+module_library: ../../../modules/
 
 instances:
   frameA:

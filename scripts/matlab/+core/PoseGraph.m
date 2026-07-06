@@ -28,7 +28,8 @@ classdef PoseGraph
             end
         end
 
-        %% propagate global poses through an edge graph via iterative FK
+        %% Iterative FK that propagates global poses through an edge graph
+        % use iterative propagation to compute the global pose of each frame in a DAG of edges, starting from one or more known root frames
         %   POSES = PROPAGATE_POSES(EDGES, ROOTNAME, ROOTPOSE)
         %     seeds a containers.Map with ROOTNAME -> ROOTPOSE (4x4) and
         %     repeatedly walks EDGES, computing poses(e.to) = poses(e.from)*e.T.
@@ -36,18 +37,25 @@ classdef PoseGraph
         %   POSES = PROPAGATE_POSES(EDGES, SEEDMAP)
         %     continuation form: caller supplies a pre-seeded pose map.
         function poses = propagatePoses(edges, rootArg, rootPose)
+            % if rootArg is a string, seed the pose map with rootPose; otherwise assume it's a pre-seeded containers.Map
             if isa(rootArg, 'containers.Map')
                 poses = rootArg;
             else
                 poses = containers.Map('KeyType', 'char', 'ValueType', 'any');
+                % seed the root frame pose
                 poses(rootArg) = rootPose;
             end
             changed = true;
+
+            % each iteration, propagate poses through the edges from the beginning; repeat until no new poses are computed
             while changed
                 changed = false;
                 for k = 1:numel(edges)
                     e = edges(k);
+
+                    % if the "from" frame is known and the "to" frame is not, propagate the pose
                     if isKey(poses, e.from) && ~isKey(poses, e.to)
+                        % compute the "to" frame pose from the "from" frame pose and the edge transform
                         poses(e.to) = poses(e.from) * e.T;
                         changed = true;
                     end

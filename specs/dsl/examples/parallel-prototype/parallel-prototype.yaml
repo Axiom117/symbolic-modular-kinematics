@@ -27,7 +27,7 @@
 dsl_version: 0
 mechanism: parallel_prototype
 description: 三支链并联雏形（固定基座 + 运动平台 + 三条 2R 支链 + 工具），验证多支链传播与多切口约束。
-module_library: ../../modules/
+module_library: ../../../modules/
 
 instances:
   baseHub:

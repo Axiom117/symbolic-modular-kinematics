@@ -24,7 +24,7 @@
 dsl_version: 0
 mechanism: open_chain_2r
 description: 两段串联转动副加工具末端的开环链，用于验证变换传播与 FK 输出。
-module_library: ../../modules/
+module_library: ../../../modules/
 
 instances:
   frame0:

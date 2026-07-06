@@ -13,18 +13,18 @@ function result = mechanism(dslYaml, configYaml)
 %
 %   MECHANISM(DSLYAML, CONFIGYAML) also injects per-instance joint
 %   variable values (revolute q, prismatic dx/dy/dz) from a config YAML keyed
-%   by mechanism name -> instance name -> variable. Unlisted joint variables
-%   default to 0 (zero pose). Geometric module parameters (cubeLength,
-%   tipDistance, ...) still come from <module_library>/config/parameters.yaml
-%   keyed by module_type.
+%   by instance name -> variable. Unlisted joint variables default to 0
+%   (zero pose). Geometric module parameters (cubeLength, tipDistance, ...)
+%   still come from <module_library>/config/dimensions.yaml keyed by
+%   module_type.
 %
 %   RESULT = MECHANISM(...) returns a struct with the mechanism
 %   name, the computed global pose map (frame name -> 4x4), and the list of
 %   any frames that could not be placed, useful for headless checking.
 %
 %   Example:
-%     viz.mechanism('../../specs/dsl/examples/open-chain-2r.yaml', ...
-%                  'mechanism_viz_config.yaml')
+%     viz.mechanism('../../specs/dsl/examples/open-chain-2r/open-chain-2r.yaml', ...
+%                  '../../specs/dsl/examples/open-chain-2r/joint_config.yaml')
 %
 %   Shared primitives (rotation/geometry/FK) live in scripts/matlab/+core/
 %   and are reused verbatim from viz.module. Mate convention follows
@@ -64,22 +64,15 @@ function result = mechanism(dslYaml, configYaml)
     dimCfgPath = fullfile(libDir, 'config', 'dimensions.yaml');
     if exist(dimCfgPath, 'file'); dimCfg = core.readYaml(dimCfgPath); end
 
-    % load the mechanism config (by instance name) if provided
-    mechCfg = struct();
+    % load per-instance joint variable overrides from the mechanism config
+    jointCfg = struct();
     if ~isempty(configYaml)
         configYaml = core.PathUtils.resolve(configYaml, here);
-        if exist(configYaml, 'file'); mechCfg = core.readYaml(configYaml); end
+        if exist(configYaml, 'file'); jointCfg = core.readYaml(configYaml); end
     end
 
-    % per-instance joint overrides for this mechanism
-    mechOv = struct();
-    mnf = matlab.lang.makeValidName(mechName);
-    if isfield(mechCfg, mnf) && isstruct(mechCfg.(mnf)); mechOv = mechCfg.(mnf); end
-
-    % --- iterate instances: load defs, inject params, expand internal graph ---
     assert(isfield(dsl, 'instances') && isstruct(dsl.instances), ...
         'Mechanism %s declares no instances.', mechName);
-
     instNames = fieldnames(dsl.instances);
 
     % number of instances in this mechanism
@@ -94,6 +87,7 @@ function result = mechanism(dslYaml, configYaml)
     % cache module definitions by type to avoid re-reading the same YAML file
     defCache = containers.Map('KeyType', 'char', 'ValueType', 'any');
 
+    % Instance struct array: name, type, module def, bodies, frames, joints
     inst = struct('name', {}, 'type', {}, 'md', {}, 'bodies', {}, ...
         'frames', {}, 'joints', {});
     
@@ -103,8 +97,10 @@ function result = mechanism(dslYaml, configYaml)
     for i = 1:nInst
         iname = instNames{i};
         itype = dsl.instances.(iname).type;
+
+        % expand this instance: load module def, inject params, expand bodies/frames/edges
         [edges, groundNodes, inst(i)] = localExpandInstance(iname, itype, ...
-            libDir, defCache, dimCfg, mechOv, edges, pendingMap, groundNodes);
+            libDir, defCache, dimCfg, jointCfg, edges, pendingMap, groundNodes);
     end
 
     % --- connections: mate socket->plug, insert bidirectional mate edges ---
@@ -278,7 +274,7 @@ end
 
 %% expand a single instance: load module def, inject params, expand bodies/frames/edges
 function [edges, groundNodes, inst_i] = localExpandInstance(iname, itype, ...
-        libDir, defCache, dimCfg, mechOv, edges, pendingMap, groundNodes)
+        libDir, defCache, dimCfg, jointCfg, edges, pendingMap, groundNodes)
     if isKey(defCache, itype)
         md = defCache(itype);
     else
@@ -294,8 +290,8 @@ function [edges, groundNodes, inst_i] = localExpandInstance(iname, itype, ...
         params = dimCfg.(matlab.lang.makeValidName(itype));
     end
 
-    if isfield(mechOv, matlab.lang.makeValidName(iname))
-        ov = mechOv.(matlab.lang.makeValidName(iname));
+    if isfield(jointCfg, matlab.lang.makeValidName(iname))
+        ov = jointCfg.(matlab.lang.makeValidName(iname));
         if isstruct(ov)
             ofn = fieldnames(ov);
             for q = 1:numel(ofn); params.(ofn{q}) = ov.(ofn{q}); end
