@@ -7,11 +7,11 @@
 #
 # 拓扑图（Mermaid）：
 #   graph LR
-#     frame0 -->|faceX+ ~ linkA| joint1
-#     joint1 -->|linkB ~ faceX-| frame1
-#     frame1 -->|faceX+ ~ linkA| joint2
-#     joint2 -->|linkB ~ faceX-| frame2
-#     frame2 -->|faceZ+ ~ connector_side| pipette
+#     frame0 -->|faceXPlus ~ linkA| joint1
+#     joint1 -->|linkB ~ faceXMinus| frame1
+#     frame1 -->|faceXPlus ~ linkA| joint2
+#     joint2 -->|linkB ~ faceXMinus| frame2
+#     frame2 -->|faceZPlus ~ connector_side| pipette
 #
 # 符号变量表（实例限定名）：
 #   joint1.q   —— 第一转动副角度（rad，observable）
@@ -42,11 +42,11 @@ instances:
 
 connections:
   # 第一段：frame0(socket) — joint1(plug)
-  - ports: [frame0.faceX+, joint1.linkA]
-  - ports: [joint1.linkB, frame1.faceX-]
+  - ports: [frame0.faceXPlus, joint1.linkA]
+  - ports: [joint1.linkB, frame1.faceXMinus]
   # 第二段：frame1(socket) — joint2(plug)
-  - ports: [frame1.faceX+, joint2.linkA]
+  - ports: [frame1.faceXPlus, joint2.linkA]
     roll: 1
-  - ports: [joint2.linkB, frame2.faceX-]
+  - ports: [joint2.linkB, frame2.faceXMinus]
   # 工具末端：frame2(socket) — pipette(plug)
-  - ports: [frame2.faceY+, pipette.connector_side]
+  - ports: [frame2.faceYPlus, pipette.connector_side]

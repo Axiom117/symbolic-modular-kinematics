@@ -33,11 +33,11 @@
 |---|------|------|------|
 | I1 | 每个实例 `type` 在模块库中存在 | grammar §4.3 | `type: Frmae`（拼写错误） |
 | I2 | 实例名不与 L0 关键字冲突（`body`/`frame`/`fixedTransform`/`joint`/`constraint`/`port`） | grammar §4.2 | 实例名写成 `joint` |
-| I3 | 每个端口引用的实例已在 `instances` 中声明 | grammar §5.2 | `ports: [ghost.faceX+, ...]` |
+| I3 | 每个端口引用的实例已在 `instances` 中声明 | grammar §5.2 | `ports: [ghost.faceXPlus, ...]` |
 | I4 | 每个端口在其模块定义中存在且 `exposed: true` | grammar §5.2 | `frame0.faceW+`（不存在的面） |
 | I5 | 连接两端**极性互补**（仅 `socket↔plug`） | conn-sem §4 | `[joint1.linkA, joint2.linkA]`（plug↔plug） |
-| I6 | 无极性端口（任务系/接地系）不得作连接端 | conn-sem §4 | `[pipette.tip_origin, frame0.faceX+]` |
-| I7 | 每个端口至多被占用一次 | grammar §6 | 同一 `frame0.faceX+` 连两次 |
+| I6 | 无极性端口（任务系/接地系）不得作连接端 | conn-sem §4 | `[pipette.tip_origin, frame0.faceXPlus]` |
+| I7 | 每个端口至多被占用一次 | grammar §6 | 同一 `frame0.faceXPlus` 连两次 |
 | I8 | `roll` 落在 `0 .. symmetry-1` | conn-sem §3.1 | `roll: 4`（symmetry=4） |
 | I9 | `closed: true` 连接确实闭合一个 L2 回路（不悬空、有环） | conn-sem §6 | 在树边上误标 `closed` |
 | I10 | 独立回路数与 `closed` 标记数一致（不欠标/多标） | conn-sem §6.3 | 3 支链并联只标 1 个 closed |

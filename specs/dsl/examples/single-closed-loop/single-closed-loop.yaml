@@ -9,14 +9,14 @@
 #
 # 拓扑图（Mermaid）：
 #   graph LR
-#     frameA -->|faceX+ ~ linkA| jointAB
-#     jointAB -->|linkB ~ faceX-| frameB
-#     frameB -->|faceX+ ~ linkA| jointBC
-#     jointBC -->|linkB ~ faceX-| frameC
-#     frameC -->|faceX+ ~ linkA| jointCD
-#     jointCD -->|linkB ~ faceX-| frameD
-#     frameD -->|faceX+ ~ linkA| jointDA
-#     jointDA -.->|linkB ~ faceX- : closed| frameA
+#     frameA -->|faceXPlus ~ linkA| jointAB
+#     jointAB -->|linkB ~ faceXMinus| frameB
+#     frameB -->|faceXPlus ~ linkA| jointBC
+#     jointBC -->|linkB ~ faceXMinus| frameC
+#     frameC -->|faceXPlus ~ linkA| jointCD
+#     jointCD -->|linkB ~ faceXMinus| frameD
+#     frameD -->|faceXPlus ~ linkA| jointDA
+#     jointDA -.->|linkB ~ faceXMinus : closed| frameA
 #
 # 符号变量表（实例限定名）：
 #   jointAB.q, jointBC.q, jointCD.q, jointDA.q —— 四个铰点角度（rad，observable）
@@ -50,13 +50,13 @@ instances:
 
 connections:
   # 树边：A → B → C → D 依次串联
-  - ports: [frameA.faceX+, jointAB.linkA]
-  - ports: [jointAB.linkB, frameB.faceX-]
-  - ports: [frameB.faceX+, jointBC.linkA]
-  - ports: [jointBC.linkB, frameC.faceX-]
-  - ports: [frameC.faceX+, jointCD.linkA]
-  - ports: [jointCD.linkB, frameD.faceX-]
-  - ports: [frameD.faceX+, jointDA.linkA]
+  - ports: [frameA.faceXPlus, jointAB.linkA]
+  - ports: [jointAB.linkB, frameB.faceXMinus]
+  - ports: [frameB.faceXPlus, jointBC.linkA]
+  - ports: [jointBC.linkB, frameC.faceXMinus]
+  - ports: [frameC.faceXPlus, jointCD.linkA]
+  - ports: [jointCD.linkB, frameD.faceXMinus]
+  - ports: [frameD.faceXPlus, jointDA.linkA]
   # 补边（chord）：jointDA 回接 frameA，闭合回路 → A.4 在此切开生成 constraint
-  - ports: [jointDA.linkB, frameA.faceX-]
+  - ports: [jointDA.linkB, frameA.faceXMinus]
     closed: true

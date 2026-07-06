@@ -22,7 +22,6 @@ function result = module(moduleYaml, configYaml)
 %       axis 'd'; R_child_in_parent = DST*SRC' (third axis by right-hand rule).
 %     - rpy = [Rx,Ry,Rz] intrinsic Z-Y-X: R = Rz*Ry*Rx.
 %     - axis_angle = Rodrigues(omega, q).
-%     - pending => identity rotation, flagged in magenta (value not yet frozen).
 
     if nargin < 1 || isempty(moduleYaml)
         error('viz:module:usage', ...
@@ -46,8 +45,7 @@ function result = module(moduleYaml, configYaml)
         if exist(configYaml, 'file')
             cfg = core.readYaml(configYaml);
 
-            % mtf = module_type field name (valid MATLAB identifier)
-            mtf = matlab.lang.makeValidName(m.module_type);
+            mtf = m.module_type;
 
             % check if the config has a field for this module_type and it's a struct
             if isfield(cfg, mtf) && isstruct(cfg.(mtf))
@@ -73,9 +71,9 @@ function result = module(moduleYaml, configYaml)
     for k = 1:numel(fts)
         t = fts{k};
         tr = core.CommonUtils.evalVec(t.translation, params);
-        [R, pend] = core.RigidBodyMath.rot(t.rotation, params);
+        R = core.RigidBodyMath.rot(t.rotation, params);
         T = core.RigidBodyMath.T(R, tr);
-        g.addFixedTransform(t.from_frame, t.to_frame, T, pend);
+        g.addFixedTransform(t.from_frame, t.to_frame, T);
     end
 
     % -- build edges from joints ---
@@ -166,11 +164,7 @@ function result = module(moduleYaml, configYaml)
         T = poses(f.name);
         isPort = isfield(f, 'exposed') && isequal(f.exposed, true);
         
-        pend = g.isFramePending(f.name);
-
-        if pend
-            color = [1 0 1]; lw = 2.0; mk = 'magenta';
-        elseif isPort
+        if isPort
             color = [0 0 0]; lw = 2.0; mk = 'PORT';
         else
             color = [0.4 0.4 0.4]; lw = 1.0; mk = 'frame';
@@ -179,14 +173,11 @@ function result = module(moduleYaml, configYaml)
         core.VizHelpers.triad(ax, T, L, lw, core.CommonUtils.tern(isPort, '-', '--'));
         plot3(ax, T(1,4), T(2,4), T(3,4), 'o', 'MarkerSize', 5, ...
             'MarkerFaceColor', color, 'MarkerEdgeColor', color);
-        lbl = f.name; if pend; lbl = [lbl ' (pending R)']; end
-        text(ax, T(1,4), T(2,4), T(3,4), ['  ' lbl], 'Color', color, ...
+        text(ax, T(1,4), T(2,4), T(3,4), ['  ' f.name], 'Color', color, ...
             'FontWeight', core.CommonUtils.tern(isPort, 'bold', 'normal'));
-        fn = matlab.lang.makeValidName(f.name);
-        result.frames.(fn) = T;
-        fprintf('  %-7s %-16s pos=[% 7.2f % 7.2f % 7.2f]  +Z=[% .2f % .2f % .2f]%s\n', ...
-            mk, f.name, T(1,4), T(2,4), T(3,4), T(1,3), T(2,3), T(3,3), ...
-            core.CommonUtils.tern(pend, '  <pending>', ''));
+        result.frames.(f.name) = T;
+        fprintf('  %-7s %-16s pos=[% 7.2f % 7.2f % 7.2f]  +Z=[% .2f % .2f % .2f]\n', ...
+            mk, f.name, T(1,4), T(2,4), T(3,4), T(1,3), T(2,3), T(3,3));
     end
 
     % unreached bodies note
@@ -196,7 +187,7 @@ function result = module(moduleYaml, configYaml)
         end
     end
 
-    title(ax, sprintf('%s  —  %d DOF, %s  (X=red Y=green Z=blue; magenta=pending)', ...
+    title(ax, sprintf('%s  —  %d DOF, %s  (X=red Y=green Z=blue)', ...
         m.module_type, core.CommonUtils.field(m, 'dof', 0), ...
         core.CommonUtils.field(m, 'extraction_status', 'n/a')), 'Interpreter', 'none');
     rotate3d(ax, 'on');

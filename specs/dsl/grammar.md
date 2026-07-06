@@ -226,10 +226,10 @@ connections:
 
 ```yaml
 connections:
-  - ports: [frame0.faceX+, joint1.linkA]           # 顺序无关；frame0 socket 为父
-  - ports: [joint1.linkB, frame1.faceX-]
+  - ports: [frame0.faceXPlus, joint1.linkA]           # 顺序无关；frame0 socket 为父
+  - ports: [joint1.linkB, frame1.faceXMinus]
     roll: 1                                          # 装配时绕法向转 90°（symmetry=4）
-  - ports: [jointDA.linkB, frameA.faceX-]
+  - ports: [jointDA.linkB, frameA.faceXMinus]
     closed: true                                     # 闭环补边，A.4 在此切开
 ```
 
@@ -274,7 +274,7 @@ connections:
 供 `visualize_mechanism.m`（A.2.5）与解释器（A.3）读取 DSL 时参考：
 
 - 实例名将作为**命名空间前缀**加在模块内部所有 `body`/`frame`/`joint` 名前，避免跨实例命名冲突
-  （如 `frame0.faceX+`、`joint1.q`）。
+  （如 `frame0.faceXPlus`、`joint1.q`）。
 - 连接在 IR 中展开为一条桥接边，施加 mate 变换 `Rz(roll·360/sym)·Rx(π)`
   （`connection-semantics.md` §2；`modeling-conventions.md` §10.2）。
 - `observable: true` 的 frame/joint（在模块定义中标记）会以实例限定名进入变量注册表，

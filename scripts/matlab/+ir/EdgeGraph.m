@@ -17,9 +17,9 @@ classdef EdgeGraph < handle
 %
 %   Usage (mechanism context):
 %       g = ir.EdgeGraph();
-%       g.addFixedTransform('frame0.body','frame0.faceX+', T, false);
+%       g.addFixedTransform('frame0.body','frame0.faceXPlus', T);
 %       g.addJoint('j1.linkA','j1.linkB', [1;0;0], q, 'revolute');
-%       g.addMate('frame0.faceX+','j1.linkA', 0, 4);
+%       g.addMate('frame0.faceXPlus','j1.linkA', 0, 4);
 %       g.addGround('manipulator.ground');
 %       poses = g.propagate();
 %
@@ -27,12 +27,11 @@ classdef EdgeGraph < handle
 
     % ---- public properties ----
     properties (SetAccess = private)
-        % Edges  – struct array with fields: from, to, T, kind, pending
+        % Edges  – struct array with fields: from, to, T, kind
         %   from/to  : char (frame / node name)
         %   T        : 4x4 double homogeneous transform
         %   kind     : char — 'fixed' | 'joint' | 'mate'
-        %   pending  : logical — true when rotation is not yet resolved
-        Edges (:,1) struct = struct('from', {}, 'to', {}, 'T', {}, 'kind', {}, 'pending', {})
+        Edges (:,1) struct = struct('from', {}, 'to', {}, 'T', {}, 'kind', {})
 
         % GroundNodes – cell array of frame names bound to world origin
         GroundNodes (:,1) cell = {}
@@ -42,18 +41,14 @@ classdef EdgeGraph < handle
     methods
 
         %% addFixedTransform  Insert a bidirectional fixed-transform edge pair.
-        %   obj.addFixedTransform(FROM, TO, T, ISPENDING)
+        %   obj.addFixedTransform(FROM, TO, T)
         %     FROM, TO  : char — frame / node names
         %     T         : 4x4 double homogeneous transform (FROM→TO)
-        %     ISPENDING : logical (default false) — true if rotation
-        %                 component is a placeholder (an align rule with
-        %                 unresolved parameters).
-        function addFixedTransform(obj, from, to, T, isPending)
-            if nargin < 5; isPending = false; end
+        function addFixedTransform(obj, from, to, T)
 
             % bidirectional edges: FROM→TO and TO→FROM (inverse transform), ensuring that the graph is traversable in either direction
-            obj.addEdge(from, to, T, 'fixed', isPending);
-            obj.addEdge(to, from, localInvT(T), 'fixed', isPending);
+            obj.addEdge(from, to, T, 'fixed');
+            obj.addEdge(to, from, localInvT(T), 'fixed');
         end
 
         %% addJoint  Insert a bidirectional joint edge pair.
@@ -63,10 +58,9 @@ classdef EdgeGraph < handle
         %     VALUE : scalar — angle (rad) for revolute, displacement
         %             (mm) for prismatic.
         function addJoint(obj, from, to, axis, value, kind)
-            if nargin < 6 || isempty(kind); kind = 'revolute'; end
             T = core.PoseGraph.jointTransform(kind, axis, value);
-            obj.addEdge(from, to, T, 'joint', false);
-            obj.addEdge(to, from, localInvT(T), 'joint', false);
+            obj.addEdge(from, to, T, 'joint');
+            obj.addEdge(to, from, localInvT(T), 'joint');
         end
 
         %% addMate  Insert a bidirectional mate edge pair (socket↔plug).
@@ -84,8 +78,10 @@ classdef EdgeGraph < handle
             Tm = core.RigidBodyMath.T( ...
                 core.RigidBodyMath.rotz(rollAngle) * core.RigidBodyMath.rotx(pi), ...
                 [0; 0; 0]);
-            obj.addEdge(socket, plug, Tm, 'mate', false);
-            obj.addEdge(plug, socket, localInvT(Tm), 'mate', false);
+
+            % bidirectional edges: SOCKET→PLUG and PLUG→SOCKET (inverse transform), ensuring that the graph is traversable in either direction
+            obj.addEdge(socket, plug, Tm, 'mate');
+            obj.addEdge(plug, socket, localInvT(Tm), 'mate');
         end
 
         %% addClosedMate  Insert a one-directional diagnostic-only mate edge.
@@ -100,7 +96,10 @@ classdef EdgeGraph < handle
             Tm = core.RigidBodyMath.T( ...
                 core.RigidBodyMath.rotz(rollAngle) * core.RigidBodyMath.rotx(pi), ...
                 [0; 0; 0]);
-            obj.addEdge(socket, plug, Tm, 'mate', false);
+
+            % one-way edge for loop-closure diagnostics; kind='closed_mate'
+            % ensures toStruct() excludes it from FK propagation
+            obj.addEdge(socket, plug, Tm, 'closed_mate');
         end
 
         %% addGround  Register a frame as bound to world origin.
@@ -135,11 +134,14 @@ classdef EdgeGraph < handle
         %   'from', 'to', 'T' — exactly the format consumed by
         %   PoseGraph.propagatePoses(edges, seed).
         function s = toStruct(obj)
-            s = obj.Edges;
-            % drop the 'kind' and 'pending' metadata fields that the
-            % FK engine does not need
+            % exclude closed_mate (diagnostic-only) edges from FK propagation.
+            % closed_mate edges represent chord cuts of kinematic loops and
+            % must not participate in pose propagation — their sole purpose
+            % is to report loop-closure residuals (gap / Zdot) after FK.
+            keepMask = ~strcmp({obj.Edges.kind}, 'closed_mate');
+            s = obj.Edges(keepMask);
+            % drop the 'kind' metadata field that the FK engine does not need
             s = rmfield(s, 'kind');
-            s = rmfield(s, 'pending');
         end
 
         %% findMates  Return all mate / closed-mate edges for diagnostics.
@@ -147,10 +149,10 @@ classdef EdgeGraph < handle
         %     returns a struct array (subset of Edges) with kind='mate'.
         function mates = findMates(obj)
             if isempty(obj.Edges)
-                mates = struct('from', {}, 'to', {}, 'T', {}, 'kind', {}, 'pending', {});
+                mates = struct('from', {}, 'to', {}, 'T', {}, 'kind', {});
                 return;
             end
-            mateMask = strcmp({obj.Edges.kind}, 'mate');
+            mateMask = strcmp({obj.Edges.kind}, 'mate') | strcmp({obj.Edges.kind}, 'closed_mate');
             mates = obj.Edges(mateMask);
         end
 
@@ -158,12 +160,13 @@ classdef EdgeGraph < handle
         %   c = g.countByKind() returns a struct with fields
         %   'fixed', 'joint', 'mate'.
         function c = countByKind(obj)
-            c.fixed = 0; c.joint = 0; c.mate = 0;
+            c.fixed = 0; c.joint = 0; c.mate = 0; c.closed_mate = 0;
             if isempty(obj.Edges); return; end
             kinds = {obj.Edges.kind};
             c.fixed = nnz(strcmp(kinds, 'fixed'));
             c.joint = nnz(strcmp(kinds, 'joint'));
             c.mate  = nnz(strcmp(kinds, 'mate'));
+            c.closed_mate = nnz(strcmp(kinds, 'closed_mate'));
         end
 
         %% numEdges  Total number of directed edges.
@@ -181,33 +184,18 @@ classdef EdgeGraph < handle
             tf = ~isempty(obj.GroundNodes);
         end
 
-        %% isFramePending  True when any edge targeting NODENAME has pending=true.
-        %   Used by visualization to color unresolved (placeholder-rotation)
-        %   frames magenta.  Replaces the pendingMap containers.Map that
-        %   mechanism.m previously maintained by hand.
-        function tf = isFramePending(obj, nodeName)
-            tf = false;
-            for k = 1:numel(obj.Edges)
-                if strcmp(obj.Edges(k).to, nodeName) && obj.Edges(k).pending
-                    tf = true;
-                    return;
-                end
-            end
-        end
-
     end
 
     % ---- private helpers ----
     methods (Access = private)
 
         %% addEdge  Append a single directed edge (internal).
-        function addEdge(obj, from, to, T, kind, isPending)
+        function addEdge(obj, from, to, T, kind)
             obj.Edges(end+1) = struct( ...
                 'from',    from, ...
                 'to',      to, ...
                 'T',       T, ...
-                'kind',    kind, ...
-                'pending', isPending);
+                'kind',    kind);
         end
 
     end

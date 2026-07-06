@@ -11,9 +11,6 @@ classdef PoseGraph
         %     - revolute (default): pure rotation VAL (rad) about axis AX
         %     - prismatic:          pure translation VAL (mm) along axis AX
         function T = jointTransform(kind, ax, val)
-            if nargin < 1 || isempty(kind)
-                kind = 'revolute';
-            end
             switch lower(kind)
                 case 'prismatic'
                     n = norm(ax);
@@ -59,17 +56,6 @@ classdef PoseGraph
                         poses(e.to) = poses(e.from) * e.T;
                         changed = true;
                     end
-                end
-            end
-        end
-
-        %% check if a frame is pending (not yet frozen) based on the edges
-        function pend = framePending(edges, name)
-            pend = false;
-            for k = 1:numel(edges)
-                if strcmp(edges(k).to, name) && edges(k).pending
-                    pend = true;
-                    return;
                 end
             end
         end

@@ -89,6 +89,36 @@ classdef VizHelpers
             end
         end
 
+        %% draw a frame origin marker (filled circle + label)
+        %   isExposed=true  → black, bold; false → gray, normal weight
+        function frameMarker(ax, T, label, isExposed)
+            if isExposed
+                fc = [0 0 0]; fw = 'bold';
+            else
+                fc = [0.45 0.45 0.45]; fw = 'normal';
+            end
+            plot3(ax, T(1,4), T(2,4), T(3,4), 'o', 'MarkerSize', 5, ...
+                'MarkerFaceColor', fc, 'MarkerEdgeColor', fc);
+            text(ax, T(1,4), T(2,4), T(3,4), ['  ' label], 'Color', fc, ...
+                'FontWeight', fw, 'Interpreter', 'none', 'FontSize', 8);
+        end
+
+        %% draw a joint axis line with label
+        %   kind: 'revolute' → red; 'prismatic' → blue
+        function jointAxis(ax, T, axisDir, L, kind, label)
+            o = T(1:3, 4); d = T(1:3, 1:3) * axisDir(:);
+            if strcmpi(kind, 'prismatic')
+                jc = [0.1 0.1 0.9];
+            else
+                jc = [0.9 0.1 0.1];
+            end
+            p1 = o - d * L * 1.3; p2 = o + d * L * 1.3;
+            line(ax, [p1(1) p2(1)], [p1(2) p2(2)], [p1(3) p2(3)], ...
+                'Color', jc, 'LineWidth', 2.5, 'LineStyle', ':');
+            text(ax, p2(1), p2(2), p2(3), ['  ' label], 'Color', jc, ...
+                'FontSize', 8, 'Interpreter', 'none');
+        end
+
         %% draw a local triad (coordinate frame) at the origin of T
         %   X=red, Y=green, Z=blue, with arrowheads
         function triad(ax, T, L, lw, ls)

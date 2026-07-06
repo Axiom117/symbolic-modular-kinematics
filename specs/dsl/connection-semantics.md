@@ -36,17 +36,17 @@ DSL 连接**顺序无关**（`grammar.md` §5.3）：
 
 ```yaml
 connections:
-  - ports: [frame0.faceX+, joint1.linkA]
+  - ports: [frame0.faceXPlus, joint1.linkA]
 ```
 
 解释器处理流程：
 
 1. 读取两端口的 `polarity`（来自各自模块定义）。
 2. 校验极性互补：仅 `socket↔plug` 合法（§4）。
-3. **自动定向**：把 `socket` 端（如 `frame0.faceX+`）取为父，`plug` 端（如 `joint1.linkA`）取为子。
+3. **自动定向**：把 `socket` 端（如 `frame0.faceXPlus`）取为父，`plug` 端（如 `joint1.linkA`）取为子。
 4. 施加 §2.1 的 mate 变换，在 IR 中插入一条桥接边，把两端口 frame 面对面重合。
 
-因此 `[frame0.faceX+, joint1.linkA]` 与 `[joint1.linkA, frame0.faceX+]` 完全等价——父/子由极性决定，
+因此 `[frame0.faceXPlus, joint1.linkA]` 与 `[joint1.linkA, frame0.faceXPlus]` 完全等价——父/子由极性决定，
 不由书写顺序决定。
 
 ### 2.3 socket 提供者
@@ -76,7 +76,7 @@ connections:
 
 ```yaml
 connections:
-  - ports: [frame1.faceX+, joint2.linkA]
+  - ports: [frame1.faceXPlus, joint2.linkA]
     roll: 1        # 装配时绕对插法向额外转 90°（symmetry=4）
 ```
 
@@ -116,7 +116,7 @@ connections:
 # 正确：插入 Adaptor
 connections:
   - ports: [manip.dock, adaptor.attachment_point]
-  - ports: [adaptor.pin_connector, frameBase.faceZ+]
+  - ports: [adaptor.pin_connector, frameBase.faceZPlus]
 ```
 
 ### 5.2 连续绕法向旋转 → 插入 revolute `Joint`

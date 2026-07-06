@@ -4,7 +4,7 @@ classdef RigidBodyMath
     %     - Elementary rotations about X, Y, Z axes
     %     - Axis-angle (Rodrigues formula)
     %     - Alignment struct (source axes → destination axes)
-    %     - Rotation struct dispatcher (rpy / axis_angle / align / pending)
+    %     - Rotation struct dispatcher (rpy / axis_angle / align)
 
     methods (Static)
 
@@ -70,20 +70,14 @@ classdef RigidBodyMath
         end
 
         %% evaluate a rotation struct into a numeric 3x3 rotation matrix
-        %   [R, PENDING] = ROT(ROT_STRUCT, PARAMS)
-        %   PENDING indicates whether the rotation is not yet frozen (identity
-        %   rotation returned; caller should flag in magenta).
-        function [R, pending] = rot(rot_struct, params)
-            pending = false;
+        %   R = ROT(ROT_STRUCT, PARAMS)
+        function R = rot(rot_struct, params)
             if ~isstruct(rot_struct)
                 R = eye(3);
                 return;
             end
             if isfield(rot_struct, 'align')
                 R = core.RigidBodyMath.align(rot_struct.align);
-            elseif isfield(rot_struct, 'pending')
-                R = eye(3);
-                pending = true;
             elseif isfield(rot_struct, 'rpy')
                 r = rot_struct.rpy;
                 rx = core.CommonUtils.evalScalar(r{1}, params);

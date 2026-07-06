@@ -34,6 +34,7 @@ function result = mechanism(dslYaml, configYaml)
     if nargin < 2; configYaml = ''; end
 
     here = fileparts(fileparts(mfilename('fullpath')));
+    repoRoot = fileparts(fileparts(here));
 
     dslYaml = core.PathUtils.resolve(dslYaml, here);
     assert(exist(dslYaml, 'file') > 0, 'DSL file not found: %s', dslYaml);
@@ -73,7 +74,7 @@ function result = mechanism(dslYaml, configYaml)
     % number of instances in this mechanism
     nInst = numel(instNames);
     
-    % shared pose-graph accumulator: edges, pending tracking, ground nodes
+    % shared pose-graph accumulator: edges, ground nodes
     g = ir.EdgeGraph();
     
     % cache module definitions by type to avoid re-reading the same YAML file
@@ -106,6 +107,7 @@ function result = mechanism(dslYaml, configYaml)
         assert(~isempty(fa), 'Connection %d: unknown port "%s".', c, refA);
         assert(~isempty(fb), 'Connection %d: unknown port "%s".', c, refB);
 
+        % check polarity: one socket + one plug
         polA = fa.polarity; polB = fb.polarity;
         if strcmp(polA, 'socket') && strcmp(polB, 'plug')
             sk = fa; pl = fb;
@@ -118,8 +120,10 @@ function result = mechanism(dslYaml, configYaml)
                  'none', polA), core.CommonUtils.tern(isempty(polB), 'none', polB));
         end
 
+        % connection parameters: roll (deg) and symmetry (integer)
         roll = core.CommonUtils.field(cn, 'roll', 0);
         sym = core.CommonUtils.field(sk, 'symmetry', 4);
+
         isClosed = isequal(core.CommonUtils.field(cn, 'closed', false), true);
 
         % Only spanning-tree (non-chord) mates propagate poses. A chord edge
@@ -143,15 +147,16 @@ function result = mechanism(dslYaml, configYaml)
     if ~g.hasGroundNodes()
         g.addGround(inst(1).bodies{1}.node);   % first body of first instance
     end
+
+    % poses is a containers.Map of frame name -> 4x4 homogeneous transform
     poses = g.propagate();
 
     % --- characteristic scale ---
     maxr = 1; ks = keys(poses);
+    % compute the maximum distance from the origin to all frames
     for k = 1:numel(ks); P = poses(ks{k}); maxr = max(maxr, norm(P(1:3, 4))); end
+    % L, the characteristic length, is used to control the size of the triads and joint axes in the visualization
     L = max(4, 0.20 * maxr);
-
-    moduleDir = libDir;
-    repoRoot = fileparts(fileparts(here));
 
     % --- figure ---
     fig = figure('Name', sprintf('Mechanism: %s', mechName), 'Color', 'w');
@@ -159,7 +164,8 @@ function result = mechanism(dslYaml, configYaml)
     view(ax, 135, 25); xlabel(ax, 'X (mm)'); ylabel(ax, 'Y (mm)'); zlabel(ax, 'Z (mm)');
     title(ax, sprintf('%s  —  %d instances, %d connections  (X=red Y=green Z=blue)', ...
         mechName, nInst, numel(conns)), 'Interpreter', 'none');
-
+    
+    % draw the world frame triad at the origin
     core.VizHelpers.triad(ax, eye(4), L * 1.4, 2.5, '-');
     text(ax, 0, 0, 0, '  world', 'FontWeight', 'bold', 'Color', [.2 .2 .2]);
 
@@ -176,13 +182,16 @@ function result = mechanism(dslYaml, configYaml)
 
         for k = 1:numel(inst(i).bodies)
             b = inst(i).bodies{k};
+            % check if the body node has a computed pose; if not, mark it as unplaced
             if ~isKey(poses, b.node); unplaced{end+1} = b.node; continue; end %#ok<AGROW>
+
             Tb = poses(b.node);
-            geomPath = core.PathUtils.resolveGeometryPath(b.geometry, moduleDir, repoRoot);
+            geomPath = core.PathUtils.resolveGeometryPath(b.geometry, libDir, repoRoot);
             if ~isempty(b.geometry) && ~isempty(geomPath)
                 geom = core.VizHelpers.importGeometry(geomPath);
                 if ~isempty(geom); core.VizHelpers.patchGeometry(ax, Tb, geom, col, 0.12); end
             end
+            % draw the body frame triad and label
             core.VizHelpers.triad(ax, Tb, L, 1.2, '-');
         end
 
@@ -194,39 +203,26 @@ function result = mechanism(dslYaml, configYaml)
                 continue;
             end
             T = poses(f.node);
-            pend = g.isFramePending(f.node);
-            if pend
-                fc = [1 0 1]; lw = 2.0; sty = '--'; mk = 'magenta';
-            elseif f.exposed
-                fc = [0 0 0]; lw = 2.0; sty = '-'; mk = 'PORT';
+            if f.exposed
+                lw = 2.0; sty = '-'; mk = 'PORT';
             else
-                fc = [0.45 0.45 0.45]; lw = 1.0; sty = '--'; mk = 'frame';
+                lw = 1.0; sty = '--'; mk = 'frame';
             end
+
+            % draw the frame triad and label
             core.VizHelpers.triad(ax, T, L, lw, sty);
-            plot3(ax, T(1,4), T(2,4), T(3,4), 'o', 'MarkerSize', 5, ...
-                'MarkerFaceColor', fc, 'MarkerEdgeColor', fc);
-            lbl = f.node; if pend; lbl = [lbl ' (pending R)']; end %#ok<AGROW>
-            text(ax, T(1,4), T(2,4), T(3,4), ['  ' lbl], 'Color', fc, ...
-                'FontWeight', core.CommonUtils.tern(f.exposed, 'bold', 'normal'), ...
-                'Interpreter', 'none', 'FontSize', 8);
-            fprintf('  %-7s %-22s pos=[% 7.2f % 7.2f % 7.2f]  +Z=[% .2f % .2f % .2f]%s\n', ...
-                mk, f.node, T(1,4), T(2,4), T(3,4), T(1,3), T(2,3), T(3,3), ...
-                core.CommonUtils.tern(pend, '  <pending>', ''));
+
+            core.VizHelpers.frameMarker(ax, T, f.node, f.exposed);
+            fprintf('  %-7s %-22s pos=[% 7.2f % 7.2f % 7.2f]  +Z=[% .2f % .2f % .2f]\n', ...
+                mk, f.node, T(1,4), T(2,4), T(3,4), T(1,3), T(2,3), T(3,3));
         end
 
         % joint axes
         for k = 1:numel(inst(i).joints)
             j = inst(i).joints{k};
             if ~isKey(poses, j.node); continue; end
-            P = poses(j.node);
-            o = P(1:3, 4); d = P(1:3, 1:3) * j.axis;
-            if strcmpi(j.kind, 'prismatic'); jc = [0.1 0.1 0.9]; else; jc = [0.9 0.1 0.1]; end
-            p1 = o - d * L * 1.3; p2 = o + d * L * 1.3;
-            line(ax, [p1(1) p2(1)], [p1(2) p2(2)], [p1(3) p2(3)], ...
-                'Color', jc, 'LineWidth', 2.5, 'LineStyle', ':');
-            text(ax, p2(1), p2(2), p2(3), sprintf('  %s.%s=%.3g', ...
-                inst(i).name, j.var, j.val), 'Color', jc, 'FontSize', 8, ...
-                'Interpreter', 'none');
+            core.VizHelpers.jointAxis(ax, poses(j.node), j.axis, L, j.kind, ...
+                sprintf('%s.%s=%.3g', inst(i).name, j.var, j.val));
         end
     end
 
@@ -234,12 +230,17 @@ function result = mechanism(dslYaml, configYaml)
     fprintf('\n-- mate checks --\n');
     for c = 1:numel(connInfo)
         ci = connInfo(c);
+        % check if both socket and plug nodes have computed poses; if not, mark them as unplaced
         if ~isKey(poses, ci.socketNode) || ~isKey(poses, ci.plugNode)
             fprintf('  [UNPLACED MATE] %s\n', ci.label); continue;
         end
         Ps = poses(ci.socketNode); Pp = poses(ci.plugNode);
+
+        % check if the origins of the socket and plug are aligned; if not, draw a dashed line between them
         gap = norm(Ps(1:3,4) - Pp(1:3,4));
         zdot = dot(Ps(1:3,3), Pp(1:3,3));   % +Z should be anti-parallel (-1)
+
+        % draw a dashed line between the socket and plug origins, colored by whether the mate is closed or not
         if ci.closed; lc = [0.95 0.55 0.10]; lw = 3.0; else; lc = [0.2 0.2 0.2]; lw = 1.5; end
         line(ax, [Ps(1,4) Pp(1,4)], [Ps(2,4) Pp(2,4)], [Ps(3,4) Pp(3,4)], ...
             'Color', lc, 'LineWidth', lw, 'LineStyle', '--');
@@ -260,62 +261,81 @@ end
 function inst_i = localExpandInstance(g, iname, itype, ...
         libDir, defCache, dimCfg, jointCfg)
     if isKey(defCache, itype)
+        % md stands for "module definition" (the parsed YAML struct for this module type)
         md = defCache(itype);
     else
         fp = fullfile(libDir, [itype '.yaml']);
         assert(exist(fp, 'file') > 0, ...
             'Instance "%s": module type "%s" not found in %s.', iname, itype, libDir);
         md = core.readYaml(fp);
+
+        % cache the module definition for future instances of this type
         defCache(itype) = md;
     end
 
+    % inject geometric parameters (cubeLength, tipDistance, ...) from the module library's config/dimensions.yaml
     params = struct();
-    if isfield(dimCfg, matlab.lang.makeValidName(itype))
-        params = dimCfg.(matlab.lang.makeValidName(itype));
+    if isfield(dimCfg, itype)
+        params = dimCfg.(itype);
     end
 
-    if isfield(jointCfg, matlab.lang.makeValidName(iname))
-        ov = jointCfg.(matlab.lang.makeValidName(iname));
+    if isfield(jointCfg, iname)
+        % ov stands for "overrides" (per-instance joint variable values from the mechanism config)
+        ov = jointCfg.(iname);
         if isstruct(ov)
+            % ofn stands for "override field names" (the joint variable names to override)
             ofn = fieldnames(ov);
             for q = 1:numel(ofn); params.(ofn{q}) = ov.(ofn{q}); end
         end
     end
 
+    % inject the instance name as a prefix to each node name, for example "inst1.body" or "inst2.faceXPlus"
     pre = [iname '.'];
 
+    % expand bodies
     bodies = core.CommonUtils.asList(core.CommonUtils.field(md, 'bodies', {}));
     bList = cell(1, numel(bodies));
     for k = 1:numel(bodies)
         b = bodies{k};
+        % assemble the body struct with the prefixed node name, original name, and geometry path (if any)
         bList{k} = struct('node', [pre b.name], 'name', b.name, ...
             'geometry', core.CommonUtils.field(b, 'geometry', ''));
     end
 
+    % expand frames
     frames = core.CommonUtils.asList(core.CommonUtils.field(md, 'frames', {}));
     fList = cell(1, numel(frames));
     for k = 1:numel(frames)
         f = frames{k};
         node = [pre f.name];
+
+        % assemble the frame struct with the prefixed node name, original name, exposed flag, polarity, semantic tag, and symmetry
         fList{k} = struct('node', node, 'name', f.name, ...
             'exposed', isfield(f, 'exposed') && isequal(f.exposed, true), ...
             'polarity', core.CommonUtils.field(f, 'polarity', ''), ...
             'semantic_tag', core.CommonUtils.field(f, 'semantic_tag', ''), ...
             'symmetry', core.CommonUtils.field(f, 'symmetry', 4));
+
+        % if this frame is marked as a ground frame, add it to the pose graph's ground nodes
         if strcmp(core.CommonUtils.field(f, 'semantic_tag', ''), 'ground')
             g.addGround(node);
         end
     end
 
+    % expand fixed transforms
+    % fixed transforms are always fully determined — no pending rotation placeholder needed here
     fts = core.CommonUtils.asList(core.CommonUtils.field(md, 'fixed_transforms', {}));
     for k = 1:numel(fts)
         t = fts{k};
         tr = core.CommonUtils.evalVec(t.translation, params);
-        [R, pend] = core.RigidBodyMath.rot(t.rotation, params);
+        R = core.RigidBodyMath.rot(t.rotation, params);
+
+        % assemble the 4x4 homogeneous transform matrix from rotation R and translation tr
         T = core.RigidBodyMath.T(R, tr);
-        g.addFixedTransform([pre t.from_frame], [pre t.to_frame], T, pend);
+        g.addFixedTransform([pre t.from_frame], [pre t.to_frame], T);
     end
 
+    % expand joints
     jts = core.CommonUtils.asList(core.CommonUtils.field(md, 'joints', {}));
     jList = cell(1, numel(jts));
     for k = 1:numel(jts)
@@ -324,10 +344,13 @@ function inst_i = localExpandInstance(g, iname, itype, ...
         val = core.CommonUtils.field(params, j.variable, 0);
         kind = core.CommonUtils.field(j, 'kind', 'revolute');
         g.addJoint([pre j.from_frame], [pre j.to_frame], ax, val, kind);
+
+        % assemble the joint struct with the prefixed node name, axis, variable name, value, and kind
         jList{k} = struct('node', [pre j.from_frame], 'axis', ax(:) / max(norm(ax), eps), ...
             'var', j.variable, 'val', val, 'kind', kind);
     end
 
+    % assemble the instance struct with the name, type, module definition, and lists of bodies, frames, and joints
     inst_i = struct('name', iname, 'type', itype, 'md', md, ...
         'bodies', {bList}, 'frames', {fList}, 'joints', {jList});
 end

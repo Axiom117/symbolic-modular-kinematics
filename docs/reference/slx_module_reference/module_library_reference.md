@@ -28,7 +28,7 @@
 
 | 模块名 | 子系统文件 | 外部端口 | 主要几何资源 | 主要内部结构 |
 |------|------|------|------|------|
-| `Frame` | `system_1.xml` | `faceX+`, `faceX-`, `faceY+`, `faceY-`, `faceZ+`, `faceZ-` | `assets/frame_hyper_cube.STEP` | 1 个主体 + 6 个面参考框架 |
+| `Frame` | `system_1.xml` | `faceXPlus`, `faceXMinus`, `faceYPlus`, `faceYMinus`, `faceZPlus`, `faceZMinus` | `assets/frame_hyper_cube.STEP` | 1 个主体 + 6 个面参考框架 |
 | `Pin` | `system_15.xml` | `sideA`, `sideB` | `assets/connector_dowel_pin.step` | 1 个主体 + 2 个连接侧 |
 | `Joint` | `system_21.xml` | `linkA`, `linkB` | `assets/linkage_hinge_joint.STEP` | 2 个主体 + 1 个转动副 |
 | `ToolPipette` | `system_32.xml` | `connector_side`, `tip_origin` | `assets/tool.STEP` | 1 个主体 + 连接端 + 针尖原点 |
@@ -44,18 +44,18 @@
 
 - 几何资源：`assets/frame_hyper_cube.STEP`
 - 参数：`cubeLength`
-- 端口：`faceX+`, `faceX-`, `faceY+`, `faceY-`, `faceZ+`, `faceZ-`
+- 端口：`faceXPlus`, `faceXMinus`, `faceYPlus`, `faceYMinus`, `faceZPlus`, `faceZMinus`
 
 各端口参考框架可从内部刚体变换直接读取：
 
 | 端口 | 平移偏移 | 轴对齐 A | 轴对齐 B |
 |------|------|------|------|
-| `faceX+` | `[cubeLength/2, 0, 0] mm` | `+X -> +Y` | `+Y -> +Z` |
-| `faceX-` | `[-cubeLength/2, 0, 0] mm` | `+X -> +Y` | `+Y -> +Z` |
-| `faceY+` | `[0, cubeLength/2, 0] mm` | `+X -> +Y` | `+Y -> +Z` |
-| `faceY-` | `[0, -cubeLength/2, 0] mm` | `+X -> +Y` | `+Y -> +Z` |
-| `faceZ+` | `[0, 0, cubeLength/2] mm` | `+Y -> -Z` | `+Z -> +X` |
-| `faceZ-` | `[0, 0, -cubeLength/2] mm` | `+Z -> +X` | `+Y -> +Z` |
+| `faceXPlus` | `[cubeLength/2, 0, 0] mm` | `+X -> +Y` | `+Y -> +Z` |
+| `faceXMinus` | `[-cubeLength/2, 0, 0] mm` | `+X -> +Y` | `+Y -> +Z` |
+| `faceYPlus` | `[0, cubeLength/2, 0] mm` | `+X -> +Y` | `+Y -> +Z` |
+| `faceYMinus` | `[0, -cubeLength/2, 0] mm` | `+X -> +Y` | `+Y -> +Z` |
+| `faceZPlus` | `[0, 0, cubeLength/2] mm` | `+Y -> -Z` | `+Z -> +X` |
+| `faceZMinus` | `[0, 0, -cubeLength/2] mm` | `+Z -> +X` | `+Y -> +Z` |
 
 内部拓扑可归纳为：
 
@@ -161,7 +161,7 @@ module:
   parameters:
     - cubeLength
   ports:
-    - name: faceX+
+    - name: faceXPlus
       role: connector
       transform:
         translation: [cubeLength/2, 0, 0]
@@ -172,7 +172,7 @@ module:
     - type: solid
     - type: rigid_transform
   topology:
-    - [body, faceX+_frame, faceX+]
+    - [body, faceXPlus_frame, faceXPlus]
 ```
 
 如果后续要从拓扑编码自动生成运动学模型，建议 DSL 至少保留以下层次：

@@ -15,6 +15,7 @@ classdef CommonUtils
             s = e;
             fn = fieldnames(params);
             for i = 1:numel(fn)
+                % replace whole-word occurrences of the parameter name with its numeric value, formatted to 12 significant digits
                 s = regexprep(s, ['\<' fn{i} '\>'], num2str(params.(fn{i}), '%.12g'));
             end
             if isempty(regexp(s, '^[\s\d\.\+\-\*\/\(\)eE]*$', 'once'))

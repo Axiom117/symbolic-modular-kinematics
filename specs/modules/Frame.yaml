@@ -28,36 +28,36 @@ bodies:
 
 # --- 端口框架表 · 六面端口（均为 exposed frame，polarity: socket）---
 frames:
-  - { name: faceX+, host: frame_hyper_cube, exposed: true, semantic_tag: connector, polarity: socket }
-  - { name: faceX-, host: frame_hyper_cube, exposed: true, semantic_tag: connector, polarity: socket }
-  - { name: faceY+, host: frame_hyper_cube, exposed: true, semantic_tag: connector, polarity: socket }
-  - { name: faceY-, host: frame_hyper_cube, exposed: true, semantic_tag: connector, polarity: socket }
-  - { name: faceZ+, host: frame_hyper_cube, exposed: true, semantic_tag: connector, polarity: socket }
-  - { name: faceZ-, host: frame_hyper_cube, exposed: true, semantic_tag: connector, polarity: socket }
+  - { name: faceXPlus, host: frame_hyper_cube, exposed: true, semantic_tag: connector, polarity: socket }
+  - { name: faceXMinus, host: frame_hyper_cube, exposed: true, semantic_tag: connector, polarity: socket }
+  - { name: faceYPlus, host: frame_hyper_cube, exposed: true, semantic_tag: connector, polarity: socket }
+  - { name: faceYMinus, host: frame_hyper_cube, exposed: true, semantic_tag: connector, polarity: socket }
+  - { name: faceZPlus, host: frame_hyper_cube, exposed: true, semantic_tag: connector, polarity: socket }
+  - { name: faceZMinus, host: frame_hyper_cube, exposed: true, semantic_tag: connector, polarity: socket }
 
 # --- 内部运动学图 · 固定变换（body 中心 frame → 各面端口）---
 fixed_transforms:
   - from_frame: frame_hyper_cube
-    to_frame: faceX+
+    to_frame: faceXPlus
     translation: [cubeLength/2, 0, 0]
     rotation: { align: { a: ["+Z", "+X"], b: ["+X", "+Z"] } }
   - from_frame: frame_hyper_cube
-    to_frame: faceX-
+    to_frame: faceXMinus
     translation: [-cubeLength/2, 0, 0]
     rotation: { align: { a: ["+Z", "-X"], b: ["+X", "+Z"] } }
   - from_frame: frame_hyper_cube
-    to_frame: faceY+
+    to_frame: faceYPlus
     translation: [0, cubeLength/2, 0]
     rotation: { align: { a: ["+Z", "+Y"], b: ["+X", "+Z"] } }
   - from_frame: frame_hyper_cube
-    to_frame: faceY-
+    to_frame: faceYMinus
     translation: [0, -cubeLength/2, 0]
     rotation: { align: { a: ["+Z", "-Y"], b: ["+X", "+Z"] } }
   - from_frame: frame_hyper_cube
-    to_frame: faceZ+
+    to_frame: faceZPlus
     translation: [0, 0, cubeLength/2]
     rotation: { align: { a: ["+Z", "+Z"], b: ["+X", "+X"] } }
   - from_frame: frame_hyper_cube
-    to_frame: faceZ-
+    to_frame: faceZMinus
     translation: [0, 0, -cubeLength/2]
     rotation: { align: { a: ["+Z", "-Z"], b: ["+X", "+X"] } }

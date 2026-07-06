@@ -10,10 +10,10 @@
 #
 # 拓扑图（Mermaid）：
 #   graph TD
-#     baseHub -->|faceX+| j1a --> link1 --> j1b -->|faceX-| platformHub
-#     baseHub -->|faceY+| j2a --> link2 --> j2b -.->|closed| platformHub
-#     baseHub -->|faceZ+| j3a --> link3 --> j3b -.->|closed| platformHub
-#     platformHub -->|faceZ+ ~ connector_side| pipette
+#     baseHub -->|faceXPlus| j1a --> link1 --> j1b -->|faceXMinus| platformHub
+#     baseHub -->|faceYPlus| j2a --> link2 --> j2b -.->|closed| platformHub
+#     baseHub -->|faceZPlus| j3a --> link3 --> j3b -.->|closed| platformHub
+#     platformHub -->|faceZPlus ~ connector_side| pipette
 #
 # 符号变量表（实例限定名）：
 #   j1a.q, j1b.q —— 支链 1 两铰点角度（rad，observable）
@@ -59,22 +59,22 @@ instances:
     type: Joint
 
 connections:
-  # --- 支链 1（树枝，不闭合）：baseHub.faceX+ → platformHub.faceX- ---
-  - ports: [baseHub.faceX+, j1a.linkA]
-  - ports: [j1a.linkB, link1.faceX-]
-  - ports: [link1.faceX+, j1b.linkA]
-  - ports: [j1b.linkB, platformHub.faceX-]
-  # --- 支链 2（补边）：baseHub.faceY+ → platformHub.faceY- ---
-  - ports: [baseHub.faceY+, j2a.linkA]
-  - ports: [j2a.linkB, link2.faceX-]
-  - ports: [link2.faceX+, j2b.linkA]
-  - ports: [j2b.linkB, platformHub.faceY-]
+  # --- 支链 1（树枝，不闭合）：baseHub.faceXPlus → platformHub.faceXMinus ---
+  - ports: [baseHub.faceXPlus, j1a.linkA]
+  - ports: [j1a.linkB, link1.faceXMinus]
+  - ports: [link1.faceXPlus, j1b.linkA]
+  - ports: [j1b.linkB, platformHub.faceXMinus]
+  # --- 支链 2（补边）：baseHub.faceYPlus → platformHub.faceYMinus ---
+  - ports: [baseHub.faceYPlus, j2a.linkA]
+  - ports: [j2a.linkB, link2.faceXMinus]
+  - ports: [link2.faceXPlus, j2b.linkA]
+  - ports: [j2b.linkB, platformHub.faceYMinus]
     closed: true
-  # --- 支链 3（补边）：baseHub.faceZ+ → platformHub.faceZ- ---
-  - ports: [baseHub.faceZ+, j3a.linkA]
-  - ports: [j3a.linkB, link3.faceX-]
-  - ports: [link3.faceX+, j3b.linkA]
-  - ports: [j3b.linkB, platformHub.faceZ-]
+  # --- 支链 3（补边）：baseHub.faceZPlus → platformHub.faceZMinus ---
+  - ports: [baseHub.faceZPlus, j3a.linkA]
+  - ports: [j3a.linkB, link3.faceXMinus]
+  - ports: [link3.faceXPlus, j3b.linkA]
+  - ports: [j3b.linkB, platformHub.faceZMinus]
     closed: true
   # --- 末端工具挂在运动平台顶面 ---
-  - ports: [platformHub.faceZ+, pipette.connector_side]
+  - ports: [platformHub.faceZPlus, pipette.connector_side]

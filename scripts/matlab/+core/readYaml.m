@@ -141,9 +141,6 @@ function [val, i] = local_parse_block(items, i, indent)
             % colon
             [key, after] = local_split_kv(items(i).txt);
 
-            % convert variable name into legitimate name in MATLAB
-            key = matlab.lang.makeValidName(key);
-
             % after ':' is empty indicates the value is nested in the next
             % layer
             if isempty(after)
@@ -203,7 +200,7 @@ function v = local_parse_flow(s)
         
         for k = 1:numel(parts)
             [key, after] = local_split_kv(parts{k});
-            v.(matlab.lang.makeValidName(key)) = local_parse_value(after);
+            v.(key) = local_parse_value(after);
         end
     elseif s(1) == '['
         inner = strtrim(s(2:end-1));
