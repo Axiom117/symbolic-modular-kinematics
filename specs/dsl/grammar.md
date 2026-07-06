@@ -96,17 +96,14 @@ connections:
 instances:
   <instance_name>:
     type: <ModuleType>
-    parameters:            # 可选
-      <param_name>: <value>
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | （键）`instance_name` | 标识符 | 是 | 实例名，机构内唯一（映射键天然去重） |
 | `type` | 模块类型名 | 是 | 引用的模块 `module_type`，必须在模块库中存在 |
-| `parameters` | 映射 | 否 | 实例参数赋值（§4.4） |
 
-实例定义不允许出现 `type`、`parameters` 以外的键。
+v0 实例定义只允许 `type` 一个字段（`additionalProperties: false`）。
 
 ### 4.2 实例名规则
 
@@ -126,13 +123,13 @@ instances:
 
 - 模块类参数（如 `Frame.cubeLength`、`ToolPipette.tipDistance`）在 **L1 模块定义**
   中**声明**（`name`/`unit`/`description`），但**取值**由独立配置文件
-  `specs/modules/config/parameters.yaml` 注入——该文件按 `module_type` 映射参数名到具体数值。
+  `specs/modules/config/dimensions.yaml` 注入——该文件按 `module_type` 映射参数名到具体数值。
   解释器在加载模块库时读取此配置，将参数值注入模块类。
 - **v0 禁止 variant**：同一模块类型的所有实例**参数完全相同**（与 Simulink 库块建模一致）。
-  因此 DSL 实例声明**不写 `parameters` 块**；所有同类型实例统一继承 `config/parameters.yaml` 中的取值。
+  因此 DSL 实例声明**不写 `parameters` 块**；所有同类型实例统一继承 `config/dimensions.yaml` 中的取值。
 - **v0 禁止跨实例引用**：参数值中不得出现对其他实例名或其参数的引用。
   跨实例依赖留待后续版本。
-- 未在 `config/parameters.yaml` 中配置的模块参数，其取值策略由 A.3 解释器与 L3 配置决定。
+- 未在 `config/dimensions.yaml` 中配置的模块参数，其取值策略由 A.3 解释器与 L3 配置决定。
 - 角度类参数若出现，必须显式标注单位（`modeling-conventions.md` §7），如 `"30 deg"`。
 
 ### 4.5 实例声明示例
@@ -271,7 +268,7 @@ connections:
 
 ## 8. 实现者须知（面向 A.2.5 可视化与 A.3 解释器）
 
-供 `visualize_mechanism.m`（A.2.5）与解释器（A.3）读取 DSL 时参考：
+供 `viz.mechanism`（A.2.5）与解释器（A.3）读取 DSL 时参考：
 
 - 实例名将作为**命名空间前缀**加在模块内部所有 `body`/`frame`/`joint` 名前，避免跨实例命名冲突
   （如 `frame0.faceXPlus`、`joint1.q`）。
@@ -279,5 +276,6 @@ connections:
   （`connection-semantics.md` §2；`modeling-conventions.md` §10.2）。
 - `observable: true` 的 frame/joint（在模块定义中标记）会以实例限定名进入变量注册表，
   供 L3 分区——DSL 层不接触该分区。
-- DSL 提供的字段（实例名、`type`、`parameters`、`ports`、`roll`）足以让可视化脚本加载各模块定义、
-  注入参数、构建全局 frame graph 并出图。
+- DSL 提供的字段（实例名、`type`、`ports`、`roll`、`closed`）足以让可视化脚本加载各模块定义、
+  注入参数、构建全局 frame graph 并出图。参数值由 `specs/modules/config/dimensions.yaml` 按
+  `module_type` 注入，关节变量由 per-example `joint_config.yaml` 按实例名覆盖。

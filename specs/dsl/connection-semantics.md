@@ -135,7 +135,10 @@ connections:
 
 ### 6.2 解释器如何处理
 
-被 `closed: true` 标记的连接，在运动学传播中**照常参与**——它和普通连接一样施加 §2 的 mate 变换。
+被 `closed: true` 标记的连接，在 IR 中**照常施加 §2 的 mate 变换**（两端口几何上贴合），
+但**不参与 FK 位姿传播**——它作为单向诊断边（`kind: closed_mate`）存在于图中，
+仅用于报告闭环残差（gap / `+Z` 反平行度）。位姿传播沿生成树边进行，不穿过弦边。
+
 区别在于 **A.4 闭环阶段**：解释器识别该连接为回路补边，在此处**切开**回路，生成一个 `Constraint`。
 
 #### 6.2.1 残差公式
@@ -167,7 +170,7 @@ $$T_{\text{residual}} = T_{\text{far}}^{-1} \cdot T_{\text{near}}$$
 
 | 流水线阶段 | `closed` 的作用 |
 |------|------|
-| **A.3 IR 展开** | 与普通连接一样施加 mate 变换，IR 图完整含环，不做切开 |
+| **A.3 IR 展开** | 施加 mate 变换并插入单向 `closed_mate` 边（与普通 mate 的双向边不同）。该边不参与 FK 传播（`toStruct()` 排除 `closed_mate`），仅保留在图中供诊断 |
 | **A.3.2 IR 校验** | 验证 `closed: true` 连接确实闭合 L2 回路（不悬空）、独立回路数与标记数一致（不欠标/多标） |
 | **A.3.3 开环 FK** | 作为「不可处理」信号：含 `closed: true` 的机构不能走纯开环 FK 管线，须路由到 A.4 |
 | **A.4 回路识别** | 显式指定切口位置，区分树边与补边（chord），避免解释器自行猜测切口 |
@@ -193,16 +196,20 @@ $$T_{\text{residual}} = T_{\text{far}}^{-1} \cdot T_{\text{near}}$$
 
 A.2.5 可视化不做闭环求解，只做装配渲染：
 
-- **所有连接（含 `closed: true`）都施加 mate 变换**，机构被完整装配成一张全局图。
-- 关节变量的具体数值通过 `mechanism_viz_config.yaml` 注入；若未提供，默认取零位。
+- **普通连接**：施加双向 mate 边（`addMate`），参与 FK 位姿传播。
+- **`closed: true` 连接**：施加单向诊断 mate 边（`addClosedMate`），mate 变换照常施加但
+  **不参与 FK 位姿传播**。闭合诊断线以橙色粗虚线渲染，用于报告该关节配置下的闭环残差
+  （gap 与 `+Z` 反平行度）。
+- 关节变量的具体数值通过 per-example `joint_config.yaml`（如
+  `specs/dsl/examples/open-chain-2r/joint_config.yaml`）按实例名注入；若未提供，默认取零位。
 - **开环机构**：零位默认值即正确装配。
 - **L2 闭环机构**（如四杆环）：零位是特意设计为满足闭环的参考构型（A.4.4 过关标准要求
   「残差表达式经手工代入零位构型验证恒为零」）。若用户提供非零位的关节值且不满足闭环约束，
-  `closed: true` 连接处会出现肉眼可见错位——此时可视化忠实地反映了「这组关节值不闭合」的
-  事实，并非渲染错误。
+  `closed: true` 连接处会出现肉眼可见错位（橙色诊断线显示非零 gap）——此时可视化忠实地反映了
+  「这组关节值不闭合」的事实，并非渲染错误。
 - **L3 世界系闭环机构**（如 M-REx 主构型）：DSL 中**没有 `closed: true`**，机构本体是
-  挂在两个 `Manipulator` 之间的开环链。两个 `Manipulator.ground` frame 在 L3 绑定到同一
-  `world` 原点——可视化中它们重合在原点处即表示「闭合」。详见 §6.4。
+  挂在两个 `Manipulator` 之间的开环链。两个 `Manipulator.ground` frame（`semantic_tag: ground`）
+  由 `mechanism.m` 自动注册为 ground node——可视化中它们重合在原点处即表示「闭合」。详见 §6.4。
 
 ### 6.3 多闭环
 
@@ -245,11 +252,13 @@ world 原点 ──[ground]── Manipulator1 ──[dock]── Adaptor ──
 
 #### 6.4.3 M-REx 构型在可视化中的表现
 
-A.2.5 可视化读取 DSL 机构文件 + L3 world_binding 后：
+A.2.5 可视化读取 DSL 机构文件后：
 
-1. 两个 `Manipulator.ground` frame 都放在 `world` 原点（重合）。
-2. 分别沿 `Manipulator1` 和 `Manipulator2` 的内部链做 FK 传播。
-3. 机构本体挂在其中一侧（或两侧分别传播后取其一侧渲染）。
+1. `mechanism.m` 在展开模块实例时，检测 `semantic_tag: ground` 的 frame（如
+   `Manipulator.ground`），自动调用 `g.addGround()` 将其注册为 ground node——
+   所有 ground node 在 FK 传播时以 `eye(4)` 为初始位姿（即 world 原点）。
+2. 两个 `Manipulator.ground` frame 因此重合在 world 原点。
+3. 分别沿 `Manipulator1` 和 `Manipulator2` 的内部链做 FK 传播，机构本体挂在两者之间。
 4. 没有 `closed: true` 边需要渲染——两张 `ground` frame 在原点重合就是「回路闭合」的几何表现。
 
 如果 Manipulator 的关节值（`dx, dy, dz`）使得机构本体两端位姿不一致，可视化不会像 L2 闭环

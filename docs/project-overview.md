@@ -271,7 +271,7 @@ DSL 定位为 L2 纯拓扑——只描述机构本体由哪些模块实例组成
 | 文件 | 内容 |
 |------|------|
 | `scripts/matlab/visualize_mechanism.m` | DSL 机构装配可视化主脚本 |
-| `scripts/matlab/mechanism_viz_config.yaml` | 机构可视化参数注入配置（关节变量值等） |
+| `specs/dsl/examples/mechanism_name/joint_config.yaml` | 机构可视化参数注入配置（关节变量值等） |
 
 过关标准：
 
@@ -282,93 +282,178 @@ DSL 定位为 L2 纯拓扑——只描述机构本体由哪些模块实例组成
 
 ### 阶段 A.3 · 解释器 v0：先跑通开环
 
-目标：先让解释器稳定吃下开环机构描述，输出可验证的刚体变换链和 FK 表达式。
+> **状态**：A.2.5 可视化代码中已完成 IR 展开的数值实现（`localExpandInstance` + `EdgeGraph` +
+> `PoseGraph` 三层架构）。A.3 的核心工作是将这套已验证的展开逻辑解耦为独立模块，升级为符号 FK
+> 生成，并补齐变量注册、执行配置、结构校验等外围设施。
 
-这是阶段 A 的第一个硬门槛，因为它能最便宜地暴露模块定义是否严谨、端口语义是否自洽、图遍历逻辑是否正确。解释器分两步走：v0 只做开环（tree），v1（A.4）扩展到闭环。
+#### 现有基础（A.2.5 中已完成，可复用）
 
-#### A.3.0 解释器流水线
+| 能力 | 实现位置 | 说明 |
+|------|------|------|
+| 实例展开 + 名前缀 | `+viz/mechanism.m` → `localExpandInstance` | 复制模块模板，展开 bodies/frames/fixed_transforms/joints，加 `instanceName.` 前缀 |
+| 参数绑定 | `+core/CommonUtils.m` → `evalScalar`/`evalVec` | 符号表达式求值：`cubeLength/2` → 数值 |
+| 参数注入 | `+viz/mechanism.m` L60-70 | `dimensions.yaml`（按 module_type）+ per-example `joint_config.yaml`（按实例名覆盖） |
+| 端口连接 → mate 边 | `+viz/mechanism.m` L105-137 | 极性校验 + `Rx(π)·Rz(roll)` mate 变换 + `addMate`/`addClosedMate` |
+| IR 图累积器 | `+ir/EdgeGraph.m` | handle class：body/frame/joint 节点，fixed/joint/mate/closed_mate 边，ground nodes，传播 |
+| FK 传播引擎 | `+core/PoseGraph.m` | `propagatePoses`：迭代 FK，当前为**数值**计算 |
+| 旋转表示求值 | `+core/RigidBodyMath.m` → `rot` | 支持 align / rpy / axis_angle 三种表示 |
+| Ground node 自动注册 | `+viz/mechanism.m` L313-315 | 检测 `semantic_tag: ground` → 自动 `g.addGround()` |
+| 模块库加载 + 缓存 | `+viz/mechanism.m` → `defCache` | `containers.Map` 按 module_type 缓存 |
+
+#### A.3 修订路线图总览
 
 ```
-DSL 机构文件   ──→  语法校验   ──→  IR 展开   ──→  结构校验   ──→  FK/约束生成
-     │              (A.2 schema)      (A.3.1)       (A.3.2)        (A.3.3/A.4)
-     ▼
- L3 执行配置   ──→  语义校验   ──→  world 绑定 + 变量指派
-                 (execution-config schema)
+A.3.0  解耦重构       A.3.1  IR 规范化      A.3.2  符号 FK 引擎     A.3.3  变量与配置       A.3.4  校验与验证
+┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+│ 抽出 IR 展开  │    │ 写 6 份 IR   │    │ 数值→符号    │    │ symbolRegistry│    │ 结构校验     │
+│ 为独立模块    │ →  │ 正式规范     │ →  │ FK 表达式    │ →  │ execution-   │ →  │ 端到端验证   │
+│              │    │              │    │ 生成         │    │ config       │    │              │
+└──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
+     1-2h               2-3h               3-4h               2-3h               2-3h
 ```
 
-#### A.3.1 IR 展开：DSL → 元件级图
+---
 
-解析模块定义与 DSL 机构描述，展开为 L0 元件级图。这是解释器的核心翻译步骤。
+#### A.3.0 · 解耦重构：抽出 IR 展开模块
 
-**输入**：
-- 模块库（`specs/modules/*.yaml`，经 A.1 schema 校验）
-- DSL 机构文件（经 `mechanism-assembly.schema.yaml` 校验）
+目标：把 `localExpandInstance` 及其支撑逻辑从 `+viz/mechanism.m` 中移出，成为独立的 IR 展开器，供可视化和符号解释器共用。
 
-**处理**：
-- 对每个实例复制模块模板，展开 `bodies` / `frames` / `fixed_transforms` / `joints`，为所有内部元件加实例名前缀以避免冲突
-- 完成参数绑定：把实例参数值代入模块类参数表达式（如 `cubeLength=10` → `cubeLength/2` → `5`）
-- 处理端口连接：根据 mate 变换（§10.2 `Rx(π) · Rz(roll)`）在 IR 中插入连接边，把两个 `exposed` frame 桥接起来
-- 注册符号变量到 `symbolRegistry`：尺寸参数（数值化后）、关节变量、任务变量
-- 展开 `portAttachment` 映射：记录每个 port 连接后在 IR 中的桥接关系
+具体任务：
 
-**输出（IR）**：
-- 元件级节点集合：`body` / `frame` / `joint`（`constraint` 仅 A.4 生成）
-- 元件级边集合：`fixedTransform` / `jointTransform`
-- `portAttachment` 映射
-- `symbolRegistry`
+- 新建 `+ir/Expander.m`，从 `+viz/mechanism.m` 中迁移：
+  - `localExpandInstance`（实例展开 + 参数注入 + 名前缀 + 边构建）
+  - `localParsePort`（端口引用解析）
+  - `localLookupFrame`（跨实例 frame 查找）
+- `+viz/mechanism.m` 改为调用 `ir.Expander`，自身只保留可视化渲染逻辑（triad、geometry、mate 诊断线、frame 报告）
+- 参数注入逻辑（`dimensions.yaml` + `joint_config.yaml` 解析）从 `mechanism.m` 迁入 Expander，作为 `Expander` 的初始化参数
 
-**变量注册表（variable registry）**：IR 展开时，解释器收集所有标记 `observable: true` 的 frame 和 joint variable，以实例限定名（如 `mc1.dx`、`pipette.tip_origin`）汇总为扁平列表。未标记 observable 的内部 frame/joint 仍参与运动学传播计算，但不注册到输出池。注册表中的变量在 A.3 执行配置中由用户分区为 `known`（已知输入）或 `unknown`（待求输出）——这个分区直接决定 FK/IK 方向，无需解释器内置模式切换。详见 `modeling-conventions.md` §3.6。
-
-**IR 规范文件**：
+产出：
 
 | 文件 | 内容 |
 |------|------|
-| `specs/ir/node-types.md` | IR 节点类型定义：`body`（含中心 frame）、`frame`（含 host、exposed、polarity、semantic_tag）、`joint`（kind/axis/variable）、`constraint` |
-| `specs/ir/edge-types.md` | IR 边类型定义：`fixedTransform`（from/to + 刚性位姿）、`jointTransform`（from/to + 关节参数化位姿） |
-| `specs/ir/symbol-registry.md` | 符号注册表规范：变量命名空间（模块级/实例级/全局）、类型（几何参数/关节变量/任务变量）、冲突检测规则 |
-| `specs/ir/port-attachment.md` | portAttachment 映射规范：连接桥接边的插入规则、mate 变换在 IR 中的表达 |
-| `specs/ir/dsl-to-ir-mapping.md` | DSL 构造到 IR 节点/边的展开规则（实例展开、连接翻译、参数代入） |
-| `specs/schema/ir-graph.schema.yaml` | JSON Schema，校验展开后的 IR 图结构完整性 |
+| `+ir/Expander.m` | IR 展开器：DSL + 模块库 + 参数配置 → EdgeGraph（IR 图） |
 
-#### A.3.2 IR 结构校验
+过关标准：`viz.mechanism` 调用三个 DSL 示例（open-chain-2r / single-closed-loop / parallel-prototype）的运行结果（图形输出、frame 位姿报告、mate gap）与重构前完全一致。
 
-在 FK 生成之前，对 IR 图做静态完整性校验：
+---
 
-- **引用完整性**：所有 `frame.host` 引用的 `body` 存在；所有 `fixedTransform.from_frame` / `to_frame` 和 `joint.from_frame` / `to_frame` 引用的 `frame` 或 `body` 存在
-- **连通性**：从 `world` 节点出发可到达所有 `body` 节点（无孤立子图）
-- **无多根**：除 `world` 外无其他根节点
-- **类型一致性**：`joint.from_frame` / `to_frame` 不能是 `exposed` frame 或 `body` 中心 frame——必须是内部 hinge frame（当前约定：`joint` 两端为模块内部 frame，不直接接 port）
-- **symbolRegistry 无冲突**：同一变量名不被重复注册为不同类型
+#### A.3.1 · IR 规范化：补齐正式规范文档
 
-> 这些校验中，引用完整性和类型检查属于 JSON Schema 无法覆盖的跨数组约束，必须在解释器代码中实现。`ir-graph.schema.yaml` 只覆盖字段存在性与类型。
+目标：以 `EdgeGraph` 和 `Expander` 的代码实现为参考，补齐 `specs/ir/` 下 6 份正式文档。**不再从零设计 IR——以已验证的代码为准反推规范文件。**
 
-#### A.3.3 开环 FK 生成
+| 文件 | 内容 | 代码参考 |
+|------|------|------|
+| `specs/ir/node-types.md` | body（name/geometry）、frame（host/exposed/polarity/semantic_tag/symmetry）、joint（kind/axis/variable/observable） | `EdgeGraph.Edges` struct 字段 + `localExpandInstance` 组装的 bList/fList/jList |
+| `specs/ir/edge-types.md` | kind 枚举（`fixed`/`joint`/`mate`/`closed_mate`）、双向边插入规则、`toStruct()` 过滤规则 | `EdgeGraph.addFixedTransform`/`addJoint`/`addMate`/`addClosedMate`/`toStruct` |
+| `specs/ir/dsl-to-ir-mapping.md` | 实例展开规则、连接翻译规则、参数代入规则、`semantic_tag: ground` → `GroundNodes` 映射 | `localExpandInstance` 全函数 |
+| `specs/ir/port-attachment.md` | mate 变换在 IR 中的边类型区分：`addMate`（双向，参与传播）/ `addClosedMate`（单向，诊断专用） | `EdgeGraph.addMate`/`addClosedMate` |
+| `specs/ir/symbol-registry.md` | `observable` flag → 变量收集规则、实例限定名格式、类型分类（geometric/joint/task） | A.3.3 中实现 `symbolRegistry` 后以代码为准编写 |
+| `specs/schema/ir-graph.schema.yaml` | 基于 EdgeGraph 展开后的 struct 结构编写 JSON Schema | `toStruct()` 输出格式 |
 
-对开环机构的 IR 图执行正向运动学传播：
+过关标准：任一 IR 规范文件中的字段/规则都能在 `EdgeGraph.m` 或 `Expander.m` 中找到对应代码行。
 
-- 从 `world` 节点出发，沿 `fixedTransform` 和 `jointTransform` 边做深度优先遍历
-- 每步累积 `T = T_current · T_edge`（先平移后旋转，§8）
-- 末端输出为相对于 `world` 的 4×4 齐次变换矩阵符号表达式
-- 位置和姿态分别提取：位置 = `T(1:3, 4)`，姿态 = Z-Y-X 欧拉角分解（`Rz(psi)·Ry(theta)·Rx(phi)`）
+---
 
-**执行配置（L3，开环）**：
+#### A.3.2 · 符号 FK 引擎：数值传播 → 符号表达式
+
+目标：在现有数值 FK 传播基础上，增加符号表达式生成能力。这是 A.3 的**核心增量**——之前所有工作都是数值的，现在要产出符号表达式供 A.5 接入 `fmincon`。
+
+具体任务：
+
+- 新建 `+ir/SymbolicFK.m`：接收 `EdgeGraph`（展开后的 IR 图），逐边累积符号 4×4 变换矩阵
+- 复用现有的 FK 传播拓扑（`PoseGraph.propagatePoses` 的遍历逻辑），但每步累积使用 MATLAB Symbolic Math Toolbox 的 `sym` 类型
+- 关节变量（`q`, `dx`, `dy`, `dz`）注册为 `syms` 符号变量
+- 几何参数（`cubeLength`, `tipDistance`）保留为 `sym` 常数（数值化后用 `sym(...)` 包装，保持类型一致）
+- 输出末端 frame 的符号位姿矩阵 $T_{\text{end}} \in \mathbb{R}^{4\times 4}$ 及分解后的位置/姿态表达式
+- 对开环机构，从 `world` 沿唯一路径传播到 `endFrame`；对含闭环机构，沿生成树传播（弦边不参与）
+
+产出：
 
 | 文件 | 内容 |
 |------|------|
-| `specs/schema/execution-config.schema.yaml` | JSON Schema，校验 L3 执行配置（开环与闭环共用） |
+| `+ir/SymbolicFK.m` | 符号 FK 引擎：EdgeGraph → 末端 frame 符号位姿表达式 |
+| `tests/pipeline/test_symbolic_fk_open_chain_2r.m` | 对 open-chain-2r 验证符号 FK 表达式与手工推导一致 |
 
-开环执行配置声明：
-- `mode: open_loop`
-- `world_binding`：哪些 `ground` frame 绑定到 `world`（含静态标定偏移）
-- `actuated_joints`：哪些关节变量是驱动输入（如 `Manipulator` 的 `dx/dy/dz` 在开环测试中为 actuated）
-- `endFrame`：FK 输出的目标坐标系
+过关标准：
 
-#### A.3.4 过关标准
+- `open-chain-2r` 的末端位姿符号表达式与手工推导一致
+- 代入具体数值（`joint_config.yaml` 中的角度）后，符号表达式求值结果与 `viz.mechanism` 数值 FK 输出一致（误差 < 1e-12）
 
-- 解释器输出的末端位姿表达式与手工推导结果一致。
-- 对同一条开环链，替换不同模块参数后仍能稳定生成新表达式，无需改解释器逻辑。
-- IR 展开后无孤立节点、无悬空引用。
-- `ir-graph.schema.yaml` 校验通过。
+---
+
+#### A.3.3 · 变量注册表与执行配置
+
+目标：补齐 `symbolRegistry` 和 L3 执行配置（`execution-config`）。
+
+具体任务：
+
+- `+ir/Expander.m` 在展开时收集所有 `observable: true` 的 frame 和 joint variable，汇总为 `symbolRegistry`（扁平列表，实例限定名）
+- `symbolRegistry` 区分变量类型：
+  - `geometric`：尺寸参数（`cubeLength`、`tipDistance`），数值化后为常数
+  - `joint`：关节变量（`q`、`dx`、`dy`、`dz`）
+  - `task`：任务 frame（如 `tip_origin`，FK 输出候选 / IK 目标候选）
+- 创建 `specs/schema/execution-config.schema.yaml`，定义 L3 配置结构：
+  - `mode`: `open_loop` | `closed_loop`
+  - `world_binding`：哪些 `ground` frame 绑定到 world（含静态标定偏移）
+  - `endFrame`：FK 输出的目标坐标系引用
+  - `actuated_joints`：驱动关节列表（开环模式）
+  - `known` / `unknown`：变量分区（决定 FK 还是 IK 方向）
+- 编写 `+ir/ExecutionConfig.m`：加载并校验 L3 执行配置，提供 `partitionVariables(registry, config)` 方法
+
+产出：
+
+| 文件 | 内容 |
+|------|------|
+| `specs/schema/execution-config.schema.yaml` | L3 执行配置 JSON Schema |
+| `+ir/ExecutionConfig.m` | 执行配置加载器与变量分区器 |
+
+过关标准：
+
+- `open-chain-2r` 的 `symbolRegistry` 包含 `joint1.q`、`joint2.q`、`pipette.tip_origin`
+- 执行配置 `mode=open_loop, endFrame=pipette.tip_origin` 能正确指导 FK 方向（endFrame 即为末端输出目标）
+
+---
+
+#### A.3.4 · IR 结构校验与端到端验证
+
+目标：实现 IR 结构校验，并跑通完整的「DSL → IR → 符号 FK → 数值验证」管线。
+
+具体任务：
+
+- 新建 `+ir/Validator.m`，实现以下校验（基于展开后的 IR 图）：
+  - **引用完整性**：所有 `frame.host` 引用的 `body` 存在；所有 `fixedTransform`/`joint` 的 `from_frame`/`to_frame` 引用的 frame 或 body 存在
+  - **连通性**：从 `world`（ground nodes）出发可到达所有 `body` 节点（无孤立子图）
+  - **Ground node 存在性**：至少有一个 ground node
+  - **类型一致性**：`joint` 的 `from_frame`/`to_frame` 不能是 `exposed` frame（当前约定：joint 两端为模块内部 hinge frame，不直接接 port）
+  - **symbolRegistry 无冲突**：同一变量名不被重复注册为不同类型
+- 对三个 DSL 示例执行全管线验证：
+  1. DSL 语法校验（A.2 `mechanism-assembly.schema.yaml`）
+  2. IR 展开（`ir.Expander`）
+  3. IR 结构校验（`ir.Validator`）
+  4. 符号 FK 生成（`ir.SymbolicFK`）
+  5. 数值代入验证（与 `viz.mechanism` 数值结果对比）
+- 编写测试脚本自动化上述流程
+
+产出：
+
+| 文件 | 内容 |
+|------|------|
+| `+ir/Validator.m` | IR 结构校验器 |
+| `tests/pipeline/test_pipeline_open_chain_2r.m` | open-chain-2r 端到端管线测试 |
+| `tests/pipeline/test_pipeline_all_examples.m` | 三个 DSL 示例的批量管线测试 |
+
+过关标准（A.3 整体）：
+
+- 解释器输出的末端位姿符号表达式与手工推导结果一致
+- 对同一条开环链，替换不同模块参数后仍能稳定生成新表达式，无需改解释器逻辑
+- IR 展开后无孤立节点、无悬空引用
+- `ir-graph.schema.yaml` 校验通过
+- 三个 DSL 示例（open-chain-2r、single-closed-loop、parallel-prototype）的 IR 展开均通过结构校验
+- 符号 FK 表达式数值求值结果与 `viz.mechanism` 数值 FK 输出一致（误差 < 1e-12）
+
+> **闭环说明**：single-closed-loop 和 parallel-prototype 含 `closed: true` 边，其符号 FK 仅沿生成树传播（弦边不参与），因此末端位姿表达式是「开环近似」，不代表闭环约束下的真实位姿。闭环约束构造由 A.4 承接。A.3 只需保证闭环机构的 IR 图展开正确、生成树 FK 可计算。
+
+---
 
 ### 阶段 A.4 · 解释器 v1：扩展到闭环约束
 
