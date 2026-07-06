@@ -23,7 +23,7 @@ function result = mechanism(dslYaml, configYaml)
 %   any frames that could not be placed, useful for headless checking.
 %
 %   Example:
-%     viz.mechanism('../../specs/dsl/examples/open-chain-2r/open-chain-2r.yaml', ...
+%     viz.mechanism('../../specs/dsl/examples/open-chain-2r/robot_description.yaml', ...
 %                  '../../specs/dsl/examples/open-chain-2r/joint_config.yaml')
 %
 

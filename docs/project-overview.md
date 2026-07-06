@@ -223,9 +223,9 @@ DSL 定位为 L2 纯拓扑——只描述机构本体由哪些模块实例组成
 
 | 示例文件 | 结构 | 验证目标 |
 |------|------|------|
-| `specs/dsl/examples/open-chain-2r.yaml` | 两段串联转动副 + 工具末端 | 变换传播、端口拼接、FK 输出 |
-| `specs/dsl/examples/single-closed-loop.yaml` | 4 杆单闭环或 Manipulator–机构–Manipulator 闭环 | 闭环约束提取、未知量识别 |
-| `specs/dsl/examples/parallel-prototype.yaml` | 三支链并联（类比 MRF 2.4 构型） | 多支链 FK 传播、多切口约束构造 |
+| `specs/dsl/examples/open-chain-2r/robot_description.yaml` | 两段串联转动副 + 工具末端 | 变换传播、端口拼接、FK 输出 |
+| `specs/dsl/examples/single-closed-loop/robot_description.yaml` | 4 杆单闭环或 Manipulator–机构–Manipulator 闭环 | 闭环约束提取、未知量识别 |
+| `specs/dsl/examples/parallel-prototype/robot_description.yaml` | 三支链并联（类比 MRF 2.4 构型） | 多支链 FK 传播、多切口约束构造 |
 
 每个示例必须附带：
 - 拓扑图（Mermaid 或 ASCII art，可放在示例文件头部注释中）
@@ -248,7 +248,7 @@ DSL 定位为 L2 纯拓扑——只描述机构本体由哪些模块实例组成
 具体任务：
 
 - 将 `visualize_module.m` 中的 `local_triad`、几何导入渲染、FK 传播、位姿报告等显示原语抽取为共享工具文件（如 `viz_common.m` 或 `+viz` 包目录），供 A.1 与 A.2.5 共用。
-- 编写 `visualize_mechanism.m`：读入一份 DSL 机构描述文件（如 `specs/dsl/examples/open-chain-2r.yaml`），解析其中的实例声明、端口连接和参数赋值。
+- 编写 `visualize_mechanism.m`：读入一份 DSL 机构描述文件（如 `specs/dsl/examples/open-chain-2r/robot_description.yaml`），解析其中的实例声明、端口连接和参数赋值。
 - 对每个实例，加载对应模块 YAML 定义（复用 A.1 的模块库），按实例参数注入数值，构建模块自身的 frame graph，并为所有内部 frame/body 名加实例名前缀以避免跨实例命名冲突。
 - 按 DSL 连接声明，在实例之间插入 mate 变换边（`Rx(π) · Rz(roll)`，与 `modeling-conventions.md` §10.2 一致），将分散的模块 frame graph 拼合成一张全局机构图。
 - 处理 `world` 绑定：将 DSL 中声明为 `ground` 语义标签的 frame 通过标定偏移挂载到 `world` 根节点。

@@ -48,9 +48,9 @@
 
 | 示例 | Schema (§1) | 解释器 (§2) | closed 数 | 独立回路数 |
 |------|------|------|------|------|
-| `open-chain-2r.yaml` | 通过 | 通过 | 0 | 0（纯树） |
-| `single-closed-loop.yaml` | 通过 | 通过 | 1 | 1（四杆环） |
-| `parallel-prototype.yaml` | 通过 | 通过 | 2 | 2（3 支链 → 2 独立环） |
+| `open-chain-2r/robot_description.yaml` | 通过 | 通过 | 0 | 0（纯树） |
+| `single-closed-loop/robot_description.yaml` | 通过 | 通过 | 1 | 1（四杆环） |
+| `parallel-prototype/robot_description.yaml` | 通过 | 通过 | 2 | 2（3 支链 → 2 独立环） |
 
 ---
 
@@ -60,9 +60,9 @@ Schema 静态校验（需 `check-jsonschema`，Python `jsonschema` 生态）：
 
 ```bash
 check-jsonschema --schema-file specs/schema/mechanism-assembly.schema.yaml \
-  specs/dsl/examples/open-chain-2r.yaml \
-  specs/dsl/examples/single-closed-loop.yaml \
-  specs/dsl/examples/parallel-prototype.yaml
+  specs/dsl/examples/open-chain-2r/robot_description.yaml \
+  specs/dsl/examples/single-closed-loop/robot_description.yaml \
+  specs/dsl/examples/parallel-prototype/robot_description.yaml
 ```
 
 §2 的解释器校验项在 A.3 解释器实现后接入；本阶段先靠人工对照模块库端口表核验。
