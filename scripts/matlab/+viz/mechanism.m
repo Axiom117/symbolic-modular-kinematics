@@ -26,11 +26,6 @@ function result = mechanism(dslYaml, configYaml)
 %     viz.mechanism('../../specs/dsl/examples/open-chain-2r/open-chain-2r.yaml', ...
 %                  '../../specs/dsl/examples/open-chain-2r/joint_config.yaml')
 %
-%   Shared primitives (rotation/geometry/FK) live in scripts/matlab/+core/
-%   and are reused verbatim from viz.module. Mate convention follows
-%   specs/modeling-conventions.md and specs/dsl/connection-semantics.md:
-%     T_plug<-socket = Rz(roll*2*pi/symmetry) * Rx(pi),  t = 0.
-%   socket is the parent (Frame face / Manipulator dock); plug is the child.
 
     if nargin < 1 || isempty(dslYaml)
         error('viz:mechanism:usage', ...
@@ -78,11 +73,8 @@ function result = mechanism(dslYaml, configYaml)
     % number of instances in this mechanism
     nInst = numel(instNames);
     
-    % store all internal fixed-transform and joint edges, plus inter-instance mates
-    edges = struct('from', {}, 'to', {}, 'T', {});
-
-    % record pending frames (from fixed transforms) for diagnostic triad coloring
-    pendingMap = containers.Map('KeyType', 'char', 'ValueType', 'any');
+    % shared pose-graph accumulator: edges, pending tracking, ground nodes
+    g = ir.EdgeGraph();
     
     % cache module definitions by type to avoid re-reading the same YAML file
     defCache = containers.Map('KeyType', 'char', 'ValueType', 'any');
@@ -90,17 +82,13 @@ function result = mechanism(dslYaml, configYaml)
     % Instance struct array: name, type, module def, bodies, frames, joints
     inst = struct('name', {}, 'type', {}, 'md', {}, 'bodies', {}, ...
         'frames', {}, 'joints', {});
-    
-    % record all frames marked as "ground" for seeding the FK pose propagation
-    groundNodes = {};
 
     for i = 1:nInst
         iname = instNames{i};
         itype = dsl.instances.(iname).type;
 
         % expand this instance: load module def, inject params, expand bodies/frames/edges
-        [edges, groundNodes, inst(i)] = localExpandInstance(iname, itype, ...
-            libDir, defCache, dimCfg, jointCfg, edges, pendingMap, groundNodes);
+        inst(i) = localExpandInstance(g, iname, itype, libDir, defCache, dimCfg, jointCfg);
     end
 
     % --- connections: mate socket->plug, insert bidirectional mate edges ---
@@ -132,8 +120,6 @@ function result = mechanism(dslYaml, configYaml)
 
         roll = core.CommonUtils.field(cn, 'roll', 0);
         sym = core.CommonUtils.field(sk, 'symmetry', 4);
-        rollAngle = roll * 2 * pi / sym;
-        Tm = core.RigidBodyMath.T(core.RigidBodyMath.rotz(rollAngle) * core.RigidBodyMath.rotx(pi), [0; 0; 0]);
         isClosed = isequal(core.CommonUtils.field(cn, 'closed', false), true);
 
         % Only spanning-tree (non-chord) mates propagate poses. A chord edge
@@ -143,8 +129,9 @@ function result = mechanism(dslYaml, configYaml)
         % multiple loops inconsistent). Chords stay diagnostic-only, so their
         % mate gap correctly reports the loop-closure residual at this config.
         if ~isClosed
-            edges(end+1) = struct('from', sk.node, 'to', pl.node, 'T', Tm); %#ok<AGROW>
-            edges(end+1) = struct('from', pl.node, 'to', sk.node, 'T', localInvT(Tm)); %#ok<AGROW>
+            g.addMate(sk.node, pl.node, roll, sym);
+        else
+            g.addClosedMate(sk.node, pl.node, roll, sym);
         end
 
         connInfo(end+1) = struct('socketNode', sk.node, 'plugNode', pl.node, ...
@@ -153,13 +140,10 @@ function result = mechanism(dslYaml, configYaml)
     end
 
     % --- world root(s) & FK propagation ---
-    seed = containers.Map('KeyType', 'char', 'ValueType', 'any');
-    if ~isempty(groundNodes)
-        for k = 1:numel(groundNodes); seed(groundNodes{k}) = eye(4); end
-    else
-        seed(inst(1).bodies{1}.node) = eye(4);   % first body of first instance
+    if ~g.hasGroundNodes()
+        g.addGround(inst(1).bodies{1}.node);   % first body of first instance
     end
-    poses = core.PoseGraph.propagatePoses(edges, seed);
+    poses = g.propagate();
 
     % --- characteristic scale ---
     maxr = 1; ks = keys(poses);
@@ -210,7 +194,7 @@ function result = mechanism(dslYaml, configYaml)
                 continue;
             end
             T = poses(f.node);
-            pend = isKey(pendingMap, f.node);
+            pend = g.isFramePending(f.node);
             if pend
                 fc = [1 0 1]; lw = 2.0; sty = '--'; mk = 'magenta';
             elseif f.exposed
@@ -273,8 +257,8 @@ function result = mechanism(dslYaml, configYaml)
 end
 
 %% expand a single instance: load module def, inject params, expand bodies/frames/edges
-function [edges, groundNodes, inst_i] = localExpandInstance(iname, itype, ...
-        libDir, defCache, dimCfg, jointCfg, edges, pendingMap, groundNodes)
+function inst_i = localExpandInstance(g, iname, itype, ...
+        libDir, defCache, dimCfg, jointCfg)
     if isKey(defCache, itype)
         md = defCache(itype);
     else
@@ -319,7 +303,7 @@ function [edges, groundNodes, inst_i] = localExpandInstance(iname, itype, ...
             'semantic_tag', core.CommonUtils.field(f, 'semantic_tag', ''), ...
             'symmetry', core.CommonUtils.field(f, 'symmetry', 4));
         if strcmp(core.CommonUtils.field(f, 'semantic_tag', ''), 'ground')
-            groundNodes{end+1} = node; %#ok<AGROW>
+            g.addGround(node);
         end
     end
 
@@ -329,10 +313,7 @@ function [edges, groundNodes, inst_i] = localExpandInstance(iname, itype, ...
         tr = core.CommonUtils.evalVec(t.translation, params);
         [R, pend] = core.RigidBodyMath.rot(t.rotation, params);
         T = core.RigidBodyMath.T(R, tr);
-        fromN = [pre t.from_frame]; toN = [pre t.to_frame];
-        edges(end+1) = struct('from', fromN, 'to', toN, 'T', T); %#ok<AGROW>
-        edges(end+1) = struct('from', toN, 'to', fromN, 'T', localInvT(T)); %#ok<AGROW>
-        if pend; pendingMap(toN) = true; end
+        g.addFixedTransform([pre t.from_frame], [pre t.to_frame], T, pend);
     end
 
     jts = core.CommonUtils.asList(core.CommonUtils.field(md, 'joints', {}));
@@ -342,11 +323,8 @@ function [edges, groundNodes, inst_i] = localExpandInstance(iname, itype, ...
         ax = core.CommonUtils.evalVec(j.axis, params);
         val = core.CommonUtils.field(params, j.variable, 0);
         kind = core.CommonUtils.field(j, 'kind', 'revolute');
-        T = core.PoseGraph.jointTransform(kind, ax, val);
-        fromN = [pre j.from_frame]; toN = [pre j.to_frame];
-        edges(end+1) = struct('from', fromN, 'to', toN, 'T', T); %#ok<AGROW>
-        edges(end+1) = struct('from', toN, 'to', fromN, 'T', localInvT(T)); %#ok<AGROW>
-        jList{k} = struct('node', fromN, 'axis', ax(:) / max(norm(ax), eps), ...
+        g.addJoint([pre j.from_frame], [pre j.to_frame], ax, val, kind);
+        jList{k} = struct('node', [pre j.from_frame], 'axis', ax(:) / max(norm(ax), eps), ...
             'var', j.variable, 'val', val, 'kind', kind);
     end
 
@@ -373,10 +351,6 @@ function f = localLookupFrame(inst, instName, portName)
     end
 end
 
-%% inverse of a homogeneous (rigid) transform
-function Ti = localInvT(T)
-    R = T(1:3,1:3); t = T(1:3,4);
-    Ti = eye(4); Ti(1:3,1:3) = R'; Ti(1:3,4) = -R' * t;
-end
+
 
 

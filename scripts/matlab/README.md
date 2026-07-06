@@ -8,10 +8,16 @@
 | 文件 | 作用 |
 |------|------|
 | `+core/readYaml.m` | 极简 YAML 子集解析器（已对照 PyYAML 验证，逐文件一致） |
+| `+core/PoseGraph.m` | FK 传播引擎 + 关节变换矩阵（全部 static，纯计算层） |
+| `+core/RigidBodyMath.m` | 3D 刚体变换与旋转数学原语 |
+| `+core/VizHelpers.m` | 可视化辅助（triad、STEP 几何导入、颜色映射） |
+| `+core/CommonUtils.m` | 通用工具（字段读取、YAML 列表展开、表达式求值） |
+| `+core/PathUtils.m` | 路径解析工具 |
+| `+ir/EdgeGraph.m` | 位姿图 IR 累积器（handle class）：管理边的增删、元数据、ground nodes，桥接 PoseGraph |
 | `+viz/module.m` | 解析单个模块 → 求解坐标系位姿 → 画三元轴 + 优先加载 body STEP 几何 |
 | `+viz/allModules.m` | 批量跑完 `specs/modules/` 下全部模块 |
 | `+viz/mechanism.m` | 解析机构装配 DSL → 多实例拼接 → 全局 FK → 可视化 |
-| `+core/` | 核心库：数学(RigidBodyMath)、FK(PoseGraph)、可视化辅助(VizHelpers)、工具(CommonUtils/PathUtils) |
+| `ARCHITECTURE.md` | 三层架构设计文档（调用层 → 累积层 → 计算层） |
 | `config/` | 参数注入配置（`mechanism_viz_config.yaml` / `module_viz_config.yaml`） |
 
 ## 用法

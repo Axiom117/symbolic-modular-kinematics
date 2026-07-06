@@ -176,6 +176,25 @@ classdef EdgeGraph < handle
             n = numel(obj.GroundNodes);
         end
 
+        %% hasGroundNodes  True when at least one ground node is registered.
+        function tf = hasGroundNodes(obj)
+            tf = ~isempty(obj.GroundNodes);
+        end
+
+        %% isFramePending  True when any edge targeting NODENAME has pending=true.
+        %   Used by visualization to color unresolved (placeholder-rotation)
+        %   frames magenta.  Replaces the pendingMap containers.Map that
+        %   mechanism.m previously maintained by hand.
+        function tf = isFramePending(obj, nodeName)
+            tf = false;
+            for k = 1:numel(obj.Edges)
+                if strcmp(obj.Edges(k).to, nodeName) && obj.Edges(k).pending
+                    tf = true;
+                    return;
+                end
+            end
+        end
+
     end
 
     % ---- private helpers ----

@@ -66,42 +66,31 @@ function result = module(moduleYaml, configYaml)
     % --- sanity check ---
     assert(~isempty(bodies), 'Module %s declares no bodies.', m.module_type);
 
-    % initialize an empty array of edges, where each edge is a struct with fields: from, to, T (transformation matrix), isJoint (boolean), and pending (boolean)
-    edges = struct('from', {}, 'to', {}, 'T', {}, 'isJoint', {}, 'pending', {});
+    % shared pose-graph accumulator (see ARCHITECTURE.md for layer design)
+    g = ir.EdgeGraph();
 
     % -- build edges from fixed transforms ---
     for k = 1:numel(fts)
-        % t = fixed transform struct with fields: from_frame, to_frame, translation, rotation
         t = fts{k};
-
-        % evaluate translation and rotation expressions into numeric values
         tr = core.CommonUtils.evalVec(t.translation, params);
         [R, pend] = core.RigidBodyMath.rot(t.rotation, params);
-
-        % add an edge from the 'from_frame' to the 'to_frame' with the computed transformation matrix T, and mark if it's pending
-        edges(end+1) = struct('from', t.from_frame, 'to', t.to_frame, ...
-            'T', core.RigidBodyMath.T(R, tr), 'isJoint', false, 'pending', pend); %#ok<AGROW>
+        T = core.RigidBodyMath.T(R, tr);
+        g.addFixedTransform(t.from_frame, t.to_frame, T, pend);
     end
 
     % -- build edges from joints ---
     for k = 1:numel(jts)
         j = jts{k};
-
-        % ax = joint axis vector, qv = joint variable value (e.g., angle for revolute)
         ax = core.CommonUtils.evalVec(j.axis, params);
         qv = core.CommonUtils.field(params, j.variable, 0);
-
-        % add an edge from the 'from_frame' to the 'to_frame' with the transformation matrix computed from the joint axis and variable, and mark it as a joint (not pending)
-        edges(end+1) = struct('from', j.from_frame, 'to', j.to_frame, ...
-            'T', core.RigidBodyMath.T(core.RigidBodyMath.axang(ax, qv), [0;0;0]), ...
-            'isJoint', true, 'pending', false); %#ok<AGROW>
+        kind = core.CommonUtils.field(j, 'kind', 'revolute');
+        g.addJoint(j.from_frame, j.to_frame, ax, qv, kind);
     end
 
     % -- pose computing using forward kinematics --
-    % root = first body's center frame at world origin; iterate the shared
-    % propagation loop (see +smk/PoseGraph.m).
     rootBody = bodies{1}.name;
-    poses = core.PoseGraph.propagatePoses(edges, rootBody, eye(4));
+    g.addGround(rootBody);
+    poses = g.propagate();
 
     moduleDir = fileparts(moduleYaml);
     repoRoot = fileparts(fileparts(here));
@@ -177,7 +166,7 @@ function result = module(moduleYaml, configYaml)
         T = poses(f.name);
         isPort = isfield(f, 'exposed') && isequal(f.exposed, true);
         
-        pend = core.PoseGraph.framePending(edges, f.name);
+        pend = g.isFramePending(f.name);
 
         if pend
             color = [1 0 1]; lw = 2.0; mk = 'magenta';
