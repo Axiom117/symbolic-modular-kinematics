@@ -15,8 +15,10 @@ classdef CommonUtils
             s = e;
             fn = fieldnames(params);
             for i = 1:numel(fn)
+                v = params.(fn{i});
+                if ~isnumeric(v); continue; end
                 % replace whole-word occurrences of the parameter name with its numeric value, formatted to 12 significant digits
-                s = regexprep(s, ['\<' fn{i} '\>'], num2str(params.(fn{i}), '%.12g'));
+                s = regexprep(s, ['\<' fn{i} '\>'], num2str(v, '%.12g'));
             end
             if isempty(regexp(s, '^[\s\d\.\+\-\*\/\(\)eE]*$', 'once'))
                 error('viz_common:unresolved', ...

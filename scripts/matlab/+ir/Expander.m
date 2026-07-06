@@ -26,12 +26,14 @@ classdef Expander < handle
         ConnectionInfo (:,1) struct          % struct array: socketNode, plugNode, closed, label
         Poses                              % containers.Map: frame name → 4×4 homogeneous transform
         LibDir         (1,:) char            % absolute path to the module library directory
+        SymbolVars                          % struct: sym variable name → sym variable (symbolic mode only)
+        EdgeGraph_                          % ir.EdgeGraph handle (public read for SymbolicFK)
     end
 
     % ---- private properties ----
     properties (Access = private)
-        EdgeGraph_                          % ir.EdgeGraph handle (internal accumulator)
         DefCache_                           % containers.Map: module_type → parsed module def
+        SymbolicMode_  (1,1) logical = false % flag: true → joint vars are sym; false → numeric
     end
 
     % ---- public methods ----
@@ -41,12 +43,14 @@ classdef Expander < handle
         %   obj = Expander(DSLYAML, CONFIGYAML)
         %     DSLYAML    : path to mechanism-assembly DSL file
         %     CONFIGYAML : (optional) path to per-instance joint variable config
-        function obj = Expander(dslYaml, configYaml)
+        function obj = Expander(dslYaml, configYaml, symbolicMode)
             if nargin < 1 || isempty(dslYaml)
                 error('ir:Expander:usage', ...
-                    'Usage: ir.Expander(dslYaml[, configYaml])');
+                    'Usage: ir.Expander(dslYaml[, configYaml[, symbolicMode]])');
             end
             if nargin < 2; configYaml = ''; end
+            if nargin < 3; symbolicMode = false; end
+            obj.SymbolicMode_ = symbolicMode;
 
             % ---- resolve paths ----
             % 'here' = scripts/matlab/ (two levels up from +ir/)
@@ -90,6 +94,7 @@ classdef Expander < handle
 
             obj.EdgeGraph_ = ir.EdgeGraph();
             obj.DefCache_ = containers.Map('KeyType', 'char', 'ValueType', 'any');
+            obj.SymbolVars = struct();
 
             obj.Instances = struct('name', {}, 'type', {}, 'md', {}, ...
                 'bodies', {}, 'frames', {}, 'joints', {});
@@ -182,7 +187,8 @@ classdef Expander < handle
             end
 
             % overlay per-instance joint variable overrides from joint_config.yaml
-            if isfield(jointCfg, iname)
+            % (skip in symbolic mode: joint vars are created as sym, not read from config)
+            if ~obj.SymbolicMode_ && isfield(jointCfg, iname)
                 ov = jointCfg.(iname);
                 if isstruct(ov)
                     ofn = fieldnames(ov);
@@ -236,8 +242,16 @@ classdef Expander < handle
             for k = 1:numel(jts)
                 j = jts{k};
                 ax = core.CommonUtils.evalVec(j.axis, params);
-                val = core.CommonUtils.field(params, j.variable, 0);
                 kind = core.CommonUtils.field(j, 'kind', 'revolute');
+                if obj.SymbolicMode_
+                    % create a symbolic variable for this joint (e.g. sym('joint1.q'))
+                    symName = [pre j.variable];
+                    validName = matlab.lang.makeValidName(symName);
+                    val = sym(validName);
+                    obj.SymbolVars.(validName) = val;
+                else
+                    val = core.CommonUtils.field(params, j.variable, 0);
+                end
                 obj.EdgeGraph_.addJoint([pre j.from_frame], [pre j.to_frame], ax, val, kind);
                 jList{k} = struct('node', [pre j.from_frame], ...
                     'axis', ax(:) / max(norm(ax), eps), ...

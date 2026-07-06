@@ -10,7 +10,11 @@ classdef RigidBodyMath
 
         %% construct a 4x4 homogeneous transformation matrix from rotation and translation
         function T = T(R, t)
-            T = eye(4);
+            if isa(R, 'sym') || isa(t, 'sym')
+                T = sym(eye(4));
+            else
+                T = eye(4);
+            end
             T(1:3,1:3) = R;
             T(1:3,4) = t(:);
         end
@@ -36,6 +40,7 @@ classdef RigidBodyMath
             n = norm(ax);
             if n < eps
                 R = eye(3);
+                if isa(q, 'sym'); R = sym(R); end
                 return;
             end
             w = ax(:) / n;

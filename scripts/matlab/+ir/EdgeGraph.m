@@ -206,5 +206,11 @@ end
 
 function Ti = localInvT(T)
     R = T(1:3,1:3); t = T(1:3,4);
-    Ti = eye(4); Ti(1:3,1:3) = R'; Ti(1:3,4) = -R' * t;
+    if isa(T, 'sym')
+        Ti = sym(eye(4));
+    else
+        Ti = eye(4);
+    end
+    Ti(1:3,1:3) = R';
+    Ti(1:3,4) = -R' * t;
 end
