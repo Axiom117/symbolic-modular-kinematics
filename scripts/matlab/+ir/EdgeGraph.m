@@ -5,7 +5,7 @@ classdef EdgeGraph < handle
 %
 %   EDGEGRAPH is NOT a solver — it accumulates edges (fixed-transforms,
 %   joints, mates) and ground-node labels, then feeds them to the
-%   existing +core/PoseGraph propagation engine.
+%   existing +core/PosePropagator propagation engine.
 %
 %   Why a handle class:
 %     - viz.module and viz.mechanism build edges incrementally across
@@ -13,17 +13,17 @@ classdef EdgeGraph < handle
 %       pass-in/pass-out of the accumulator on every call.
 %     - A handle class provides in-place mutation, keeping call sites
 %       clean while retaining the existing struct-based edge format
-%       that PoseGraph.propagatePoses expects.
+%       that PosePropagator.propagatePoses expects.
 %
 %   Usage (mechanism context):
 %       g = ir.EdgeGraph();
 %       g.addFixedTransform('frame0.body','frame0.faceXPlus', T);
 %       g.addJoint('j1.linkA','j1.linkB', [1;0;0], q, 'revolute');
 %       g.addMate('frame0.faceXPlus','j1.linkA', 0, 4);
-%       g.addGround('manipulator.ground');
+%       g.addRoot('toolpipette.tip_origin');
 %       poses = g.propagate();
 %
-%   See also: +core/PoseGraph, +viz/mechanism, +viz/module
+%   See also: +core/PosePropagator, +viz/mechanism, +viz/module
 
     % ---- public properties ----
     properties (SetAccess = private)
@@ -33,8 +33,8 @@ classdef EdgeGraph < handle
         %   kind     : char — 'fixed' | 'joint' | 'mate'
         Edges (:,1) struct = struct('from', {}, 'to', {}, 'T', {}, 'kind', {})
 
-        % GroundNodes – cell array of frame names bound to world origin
-        GroundNodes (:,1) cell = {}
+        % RootNodes – cell array of frame names that seed FK propagation
+        RootNodes (:,1) cell = {}
     end
 
     % ---- public methods ----
@@ -58,7 +58,7 @@ classdef EdgeGraph < handle
         %     VALUE : scalar — angle (rad) for revolute, displacement
         %             (mm) for prismatic.
         function addJoint(obj, from, to, axis, value, kind)
-            T = core.PoseGraph.jointTransform(kind, axis, value);
+            T = core.PosePropagator.jointTransform(kind, axis, value);
             obj.addEdge(from, to, T, 'joint');
             obj.addEdge(to, from, localInvT(T), 'joint');
         end
@@ -102,37 +102,42 @@ classdef EdgeGraph < handle
             obj.addEdge(socket, plug, Tm, 'closed_mate');
         end
 
-        %% addGround  Register a frame as bound to world origin.
-        %   During propagate(), every ground node is seeded with
-        %   pose = eye(4).  Multiple ground nodes are supported for
+        %% addRoot  Register a frame as a propagation root (seed pose = eye(4)).
+        %   During propagate(), every root node is seeded with
+        %   pose = eye(4).  Multiple root nodes are supported for
         %   multi-branch / parallel mechanisms.
-        function addGround(obj, node)
-            obj.GroundNodes{end+1} = node;
+        %
+        %   In the tool-rooted growth paradigm, the root is typically a
+        %   tool reference frame (e.g. ToolPipette.tip_origin) from which
+        %   the mechanism grows outward toward manipulator modules.
+        function addRoot(obj, node)
+            obj.RootNodes{end+1} = node;
         end
 
         %% propagate  Run FK propagation and return a pose map.
         %   poses = g.propagate()
         %     returns containers.Map where keys are frame names and
         %     values are 4x4 homogeneous transforms.
-        %     If no ground nodes are registered, the 'from' field of the
+        %     If no root nodes are registered, the 'from' field of the
         %     first edge is used as the root.
         function poses = propagate(obj)
             seed = containers.Map('KeyType', 'char', 'ValueType', 'any');
-            if ~isempty(obj.GroundNodes)
-                for k = 1:numel(obj.GroundNodes)
-                    seed(obj.GroundNodes{k}) = eye(4);
+            if ~isempty(obj.RootNodes)
+                for k = 1:numel(obj.RootNodes)
+                    seed(obj.RootNodes{k}) = eye(4);
                 end
             elseif ~isempty(obj.Edges)
+                % use the 'from' node of the first edge as the root if no root nodes are registered
                 seed(obj.Edges(1).from) = eye(4);
             end
             edgeStruct = obj.toStruct();
-            poses = core.PoseGraph.propagatePoses(edgeStruct, seed);
+            poses = core.PosePropagator.propagatePoses(edgeStruct, seed);
         end
 
-        %% toStruct  Export edges as the struct array that PoseGraph expects.
+        %% toStruct  Export edges as the struct array that PosePropagator expects.
         %   s = g.toStruct() returns a struct array with fields
         %   'from', 'to', 'T' — exactly the format consumed by
-        %   PoseGraph.propagatePoses(edges, seed).
+        %   PosePropagator.propagatePoses(edges, seed).
         function s = toStruct(obj)
             % exclude closed_mate (diagnostic-only) edges from FK propagation.
             % closed_mate edges represent chord cuts of kinematic loops and
@@ -174,14 +179,14 @@ classdef EdgeGraph < handle
             n = numel(obj.Edges);
         end
 
-        %% numGroundNodes  Number of registered ground nodes.
-        function n = numGroundNodes(obj)
-            n = numel(obj.GroundNodes);
+        %% numRootNodes  Number of registered root nodes.
+        function n = numRootNodes(obj)
+            n = numel(obj.RootNodes);
         end
 
-        %% hasGroundNodes  True when at least one ground node is registered.
-        function tf = hasGroundNodes(obj)
-            tf = ~isempty(obj.GroundNodes);
+        %% hasRootNodes  True when at least one root node is registered.
+        function tf = hasRootNodes(obj)
+            tf = ~isempty(obj.RootNodes);
         end
 
     end

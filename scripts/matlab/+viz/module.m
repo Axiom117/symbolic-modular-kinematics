@@ -87,7 +87,7 @@ function result = module(moduleYaml, configYaml)
 
     % -- pose computing using forward kinematics --
     rootBody = bodies{1}.name;
-    g.addGround(rootBody);
+    g.addRoot(rootBody);
     poses = g.propagate();
 
     moduleDir = fileparts(moduleYaml);

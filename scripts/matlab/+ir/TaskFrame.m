@@ -1,27 +1,28 @@
-classdef SymbolicFK < handle
-%SYMBOLICFK  Symbolic forward-kinematics engine (thin wrapper over EdgeGraph).
-%   Extracts the symbolic 4×4 homogeneous pose of a named end frame from a
-%   symbolically-expanded EdgeGraph (built by ir.Expander in symbolicMode=true).
+classdef TaskFrame < handle
+%TASKFRAME  Symbolic end-frame expression extracted from the IR pose graph.
+%   Queries a symbolically-expanded EdgeGraph (built by ir.Expander in the
+%   pure symbolic pipeline, A.4.0) for a named end frame, decomposes the
+%   4×4 homogeneous pose into position and rotation symbolic expressions,
+%   and provides eval() for fast numeric evaluation without config files.
 %
-%   SYMBOLICFK is not a solver — it queries the already-propagated pose map
+%   TASKFRAME is not a solver — it queries the already-propagated pose map
 %   from EdgeGraph and decomposes the result into position and rotation
 %   symbolic expressions.  The underlying FK propagation is handled by
-%   EdgeGraph.propagate() → PoseGraph.propagatePoses(), which already
-%   supports mixed double/sym transform matrices via MATLAB's polymorphic
-%   arithmetic operators.
+%   EdgeGraph.propagate() → PosePropagator.propagatePoses(), which supports
+%   mixed double/sym transform matrices via MATLAB's polymorphic operators.
 %
 %   Usage:
-%       e = ir.Expander(dslYaml, '', true);            % symbolic mode
-%       fk = ir.SymbolicFK(e.EdgeGraph_, 'pipette.tip_origin');
-%       % fk.TSym     — 4×4 sym  homogeneous transform (world→endFrame)
-%       % fk.PosExpr  — 3×1 sym  position [x; y; z]
-%       % fk.RotExpr  — 3×3 sym  rotation matrix
-%       % fk.JointVars — sym array of all joint variables on the path
+%       e = ir.Expander(dslYaml);                   % pure symbolic expansion
+%       tf = ir.TaskFrame(e.EdgeGraph_, 'pipette.tip_origin');
+%       % tf.TSym     — 4×4 sym  homogeneous transform (world→endFrame)
+%       % tf.PosExpr  — 3×1 sym  position [x; y; z]
+%       % tf.RotExpr  — 3×3 sym  rotation matrix
+%       % tf.JointVars — sym array of all joint variables on the path
 %
 %       % Evaluate at specific joint values:
-%       T_num = double(subs(fk.TSym, fk.JointVars, [0.5236; -0.7854]));
+%       T_num = double(subs(tf.TSym, tf.JointVars, [0.5236; -0.7854]));
 %
-%   See also: +ir/EdgeGraph, +ir/Expander, +core/PoseGraph
+%   See also: +ir/EdgeGraph, +ir/Expander, +core/PosePropagator
 
     % ---- public read-only properties ----
     properties (SetAccess = private)
@@ -36,15 +37,15 @@ classdef SymbolicFK < handle
     methods
 
         %% Constructor: propagate FK and extract the end-frame symbolic pose.
-        %   obj = SymbolicFK(EDGEGRAPH, ENDFRAME)
+        %   obj = TaskFrame(EDGEGRAPH, ENDFRAME)
         %     EDGEGRAPH : ir.EdgeGraph with symbolic joint edges (built by
-        %                 Expander in symbolicMode=true).  Fixed and mate
-        %                 edges may be numeric (double) — they are
-        %                 auto-promoted during propagation.
+        %                 ir.Expander in the pure symbolic pipeline).
+        %                 Fixed and mate edges may be numeric (double) —
+        %                 they are auto-promoted during propagation.
         %     ENDFRAME  : char — fully-qualified frame name (e.g.
         %                 'pipette.tip_origin') reachable from ground nodes
         %                 via spanning-tree edges.
-        function obj = SymbolicFK(edgeGraph, endFrame)
+        function obj = TaskFrame(edgeGraph, endFrame)
             arguments
                 edgeGraph  (1,1) ir.EdgeGraph
                 endFrame   (1,:) char
@@ -53,12 +54,12 @@ classdef SymbolicFK < handle
             obj.EndFrame = endFrame;
 
             % propagate poses through the symbolic edge graph.
-            % PoseGraph.propagatePoses handles mixed double/sym T matrices
+            % PosePropagator.propagatePoses handles mixed double/sym T matrices
             % transparently; closed_mate edges are excluded by toStruct().
             poses = edgeGraph.propagate();
 
             assert(isKey(poses, endFrame), ...
-                'ir:SymbolicFK:endFrameNotFound', ...
+                'ir:TaskFrame:endFrameNotFound', ...
                 ['End frame "%s" not found in propagated poses. ' ...
                  'Check that the frame is reachable from a ground node.'], ...
                 endFrame);
@@ -84,9 +85,11 @@ classdef SymbolicFK < handle
                 vals (:,1) double
             end
             assert(numel(vals) == numel(obj.JointVars), ...
-                'ir:SymbolicFK:valCount', ...
+                'ir:TaskFrame:valCount', ...
                 'Expected %d joint values, got %d.', ...
                 numel(obj.JointVars), numel(vals));
+
+            % Evaluate the symbolic transform at the given joint values and convert to double.
             T = double(subs(obj.TSym, obj.JointVars, reshape(vals, size(obj.JointVars))));
         end
 

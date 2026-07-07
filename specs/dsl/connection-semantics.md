@@ -254,10 +254,13 @@ world 原点 ──[ground]── Manipulator1 ──[dock]── Adaptor ──
 
 A.2.5 可视化读取 DSL 机构文件后：
 
-1. `mechanism.m` 在展开模块实例时，检测 `semantic_tag: ground` 的 frame（如
-   `Manipulator.ground`），自动调用 `g.addGround()` 将其注册为 ground node——
-   所有 ground node 在 FK 传播时以 `eye(4)` 为初始位姿（即 world 原点）。
-2. 两个 `Manipulator.ground` frame 因此重合在 world 原点。
+1. `mechanism.m` 在展开模块实例时，检测 `semantic_tag: root` 的 frame（如
+   `ToolPipette.tip_origin`），自动调用 `g.addRoot()` 将其注册为 root node——
+   所有 root node 在 FK 传播时以 `eye(4)` 为初始位姿（即 world 原点）。
+   `semantic_tag: ground`（如 `Manipulator.ground`）是独立的标签，仅标识 L3 世界绑定端点，
+   不触发 root 自动注册。
+2. 在工具端生长范式下，FK 从 root node（工具端）向外传播到 `Manipulator` 端。
+   在 L3 世界系闭环执行中，两个 `Manipulator.ground` frame 绑定到同一 `world` 原点，形成回路。
 3. 分别沿 `Manipulator1` 和 `Manipulator2` 的内部链做 FK 传播，机构本体挂在两者之间。
 4. 没有 `closed: true` 边需要渲染——两张 `ground` frame 在原点重合就是「回路闭合」的几何表现。
 

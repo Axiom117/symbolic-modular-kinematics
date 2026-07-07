@@ -5,7 +5,7 @@ classdef PathUtils
 
     methods (Static)
 
-        %% resolve a relative path against a reference directory to produce an absolute path
+        %% convert a relative path to an absolute path, using a reference directory
         function p = resolve(p, here)
             if exist(p, 'file')
                 return;

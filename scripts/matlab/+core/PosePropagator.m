@@ -1,5 +1,5 @@
-classdef PoseGraph
-    %POSEGRAPH  Joint transforms & iterative FK pose propagation.
+classdef PosePropagator
+    %POSEPROPAGATOR  Joint transforms & iterative FK pose propagation.
     %   All methods are static.  Handles revolute/prismatic joint edge
     %   construction and forward-kinematics propagation through a frame
     %   DAG (handles multi-root and loop graphs gracefully).

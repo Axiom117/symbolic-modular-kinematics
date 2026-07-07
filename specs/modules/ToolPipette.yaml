@@ -28,7 +28,7 @@ bodies:
 # --- 端口框架表（connector_side 为机械对接面 plug；tip_origin 为任务系，无极性）---
 frames:
   - { name: connector_side, host: body, exposed: true, semantic_tag: connector, polarity: plug }
-  - { name: tip_origin, host: body, exposed: false, semantic_tag: tool, observable: true }
+  - { name: tip_origin, host: body, exposed: false, semantic_tag: root, observable: true }
 
 # --- 内部运动学图 ---
 fixed_transforms:
@@ -39,4 +39,4 @@ fixed_transforms:
   - from_frame: body
     to_frame: tip_origin
     translation: [0, 0, -tipDistance]
-    rotation: { pending: true }
+    rotation: { align: { a: ["+X", "-Y"], b: ["+Y", "+X"] } }

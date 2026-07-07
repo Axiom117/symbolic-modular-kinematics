@@ -19,7 +19,7 @@ additionalProperties: false
 required:
   - nodes
   - edges
-  - groundNodes
+  - rootNodes
 
 properties:
   nodes:
@@ -70,8 +70,8 @@ properties:
         items:
           $ref: "#/$defs/edge"
 
-  groundNodes:
-    description: 绑定到世界原点（T=eye(4)）的节点名列表。
+  rootNodes:
+    description: FK 传播根节点（seed pose = I₄）的实例限定名列表。工具端生长范式下通常为工具模块参考 frame。
     type: array
     items:
       type: string

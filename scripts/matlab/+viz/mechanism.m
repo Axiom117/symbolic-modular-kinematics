@@ -1,20 +1,25 @@
 function result = mechanism(dslYaml, configYaml)
 %MECHANISM  Validate & visualize a full modular mechanism assembly.
 %   MECHANISM(DSLYAML) parses a mechanism-assembly DSL file from
-%   specs/dsl/examples/*.yaml, delegates DSL→IR expansion to ir.Expander,
-%   then draws:
+%   specs/dsl/examples/*.yaml, delegates DSL→IR expansion to ir.Expander
+%   (pure symbolic pipeline), substitutes joint values from config, then
+%   draws:
 %     - each body as imported STEP geometry when available (colored by type)
 %     - each frame/port as an RGB coordinate triad (X=red, Y=green, Z=blue)
 %     - each mate as a diagnostic segment between the paired port origins
 %       (zero-length when aligned; a visible gap reveals mis-mated ports)
 %     - each 1-DOF joint axis as a highlighted segment
 %
-%   MECHANISM(DSLYAML, CONFIGYAML) also injects per-instance joint
-%   variable values (revolute q, prismatic dx/dy/dz) from a config YAML keyed
-%   by instance name -> variable. Unlisted joint variables default to 0
-%   (zero pose). Geometric module parameters (cubeLength, tipDistance, ...)
-%   still come from <module_library>/config/dimensions.yaml keyed by
-%   module_type.
+%   MECHANISM(DSLYAML, CONFIGYAML) loads per-instance joint variable
+%   values (revolute q, prismatic dx/dy/dz) from a config YAML keyed
+%   by instance name -> variable.  These values are substituted into the
+%   symbolic poses at render time (via ir.Expander.evaluateNumeric).
+%   Unlisted joint variables default to 0 (zero pose).  Geometric module
+%   parameters (cubeLength, tipDistance, ...) come from
+%   <module_library>/config/dimensions.yaml keyed by module_type.
+%
+%   Pipeline (A.4.0 pure symbolic):
+%     DSL → ir.Expander (symbolic) → evaluateNumeric(config) → render
 %
 %   RESULT = MECHANISM(...) returns a struct with the mechanism
 %   name, the computed global pose map (frame name -> 4x4), and the list of
@@ -24,7 +29,7 @@ function result = mechanism(dslYaml, configYaml)
 %     viz.mechanism('../../specs/dsl/examples/open-chain-2r/robot_description.yaml', ...
 %                  '../../specs/dsl/examples/open-chain-2r/joint_config.yaml')
 %
-%   See also: +ir/Expander, +ir/EdgeGraph, +core/PoseGraph
+%   See also: +ir/Expander, +ir/EdgeGraph, +core/PosePropagator
 
     if nargin < 1 || isempty(dslYaml)
         error('viz:mechanism:usage', ...
@@ -36,15 +41,17 @@ function result = mechanism(dslYaml, configYaml)
     here = fileparts(fileparts(mfilename('fullpath')));
     repoRoot = fileparts(fileparts(here));
 
-    % ---- DSL → IR expansion (delegated to ir.Expander, A.3.0) ----
-    e = ir.Expander(dslYaml, configYaml);
+    % ---- DSL → IR expansion ----
+    expander = ir.Expander(dslYaml);
 
-    % ---- read expanded state into local variables (names match pre-A.3.0 code) ----
-    mechName = e.MechName;
-    inst     = e.Instances;
-    connInfo = e.ConnectionInfo;
-    poses    = e.Poses;
-    libDir   = e.LibDir;
+    % ---- numeric evaluation for rendering (substitute joint values from config) ----
+    poses = expander.evaluateNumeric(configYaml);
+
+    % ---- read expanded state into local variables ----
+    mechName = expander.MechName;
+    inst     = expander.Instances;
+    connInfo = expander.ConnectionInfo;
+    libDir   = expander.LibDir;
     nInst    = numel(inst);
     nConns   = numel(connInfo);
 
@@ -73,20 +80,24 @@ function result = mechanism(dslYaml, configYaml)
     fprintf('\n=== mechanism: %s (%d instances, %d connections) ===\n', ...
         mechName, nInst, nConns);
 
+    % --- iterate over instances and draw bodies, frames, and joints ---
     for i = 1:nInst
         col = core.VizHelpers.typeColor(inst(i).type);
         fprintf('\n-- instance %s [%s] --\n', inst(i).name, inst(i).type);
 
+        % draw each body for this instance
         for k = 1:numel(inst(i).bodies)
             b = inst(i).bodies{k};
             % check if the body node has a computed pose; if not, mark it as unplaced
             if ~isKey(poses, b.node); unplaced{end+1} = b.node; continue; end %#ok<AGROW>
 
+            % Tb: the 4x4 homogeneous transform of the body in world coordinates
             Tb = poses(b.node);
+            
             geomPath = core.PathUtils.resolveGeometryPath(b.geometry, libDir, repoRoot);
             if ~isempty(b.geometry) && ~isempty(geomPath)
                 geom = core.VizHelpers.importGeometry(geomPath);
-                if ~isempty(geom); core.VizHelpers.patchGeometry(ax, Tb, geom, col, 0.12); end
+                if ~isempty(geom); core.VizHelpers.patchGeometry(ax, Tb, geom, col, 1); end
             end
             % draw the body frame triad and label
             core.VizHelpers.triad(ax, Tb, L, 1.2, '-');
@@ -118,8 +129,14 @@ function result = mechanism(dslYaml, configYaml)
         for k = 1:numel(inst(i).joints)
             j = inst(i).joints{k};
             if ~isKey(poses, j.node); continue; end
+            jKey = [inst(i).name '.' j.var];
+            if isKey(expander.JointValues, jKey)
+                jVal = expander.JointValues(jKey);
+            else
+                jVal = 0;
+            end
             core.VizHelpers.jointAxis(ax, poses(j.node), j.axis, L, j.kind, ...
-                sprintf('%s.%s=%.3g', inst(i).name, j.var, j.val));
+                sprintf('%s.%s=%.3g', inst(i).name, j.var, jVal));
         end
     end
 

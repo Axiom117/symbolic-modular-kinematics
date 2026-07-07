@@ -76,7 +76,7 @@ $$T = \begin{bmatrix} R & t \\ 0 & 1 \end{bmatrix}$$
 ```matlab
 % EdgeGraph.m L58-63
 function addJoint(obj, from, to, axis, value, kind)
-    T = core.PoseGraph.jointTransform(kind, axis, value);
+    T = core.PosePropagator.jointTransform(kind, axis, value);
     obj.addEdge(from, to, T, 'joint');
     obj.addEdge(to, from, localInvT(T), 'joint');
 end
@@ -95,7 +95,7 @@ $$T = \begin{bmatrix} R_{\text{axis}}(\text{value}) & 0 \\ 0 & 1 \end{bmatrix}$$
 $$T = \begin{bmatrix} I & d \\ 0 & 1 \end{bmatrix}, \quad d = \frac{\text{axis}}{\|\text{axis}\|} \cdot \text{value}$$
 
 ```matlab
-% PoseGraph.m L12-25
+% PosePropagator.m L12-25
 function T = jointTransform(kind, ax, val)
     switch lower(kind)
         case 'prismatic'
@@ -184,7 +184,7 @@ end
 
 ## 6. toStruct 过滤规则
 
-`EdgeGraph.propagate()` 在调用 `PoseGraph.propagatePoses` 前，通过 `toStruct()` 剥离元数据并排除诊断边：
+`EdgeGraph.propagate()` 在调用 `PosePropagator.propagatePoses` 前，通过 `toStruct()` 剥离元数据并排除诊断边：
 
 ```matlab
 % EdgeGraph.m L129-137
@@ -200,7 +200,7 @@ end
 1. 排除所有 `kind = 'closed_mate'` 的边（弦边不参与 FK）
 2. 剥离 `kind` 字段（FK 引擎只需要 `from` / `to` / `T`）
 
-**输出格式**：`struct` 数组，字段 `{from, to, T}`，直接传给 `PoseGraph.propagatePoses(edges, seed)`。
+**输出格式**：`struct` 数组，字段 `{from, to, T}`，直接传给 `PosePropagator.propagatePoses(edges, seed)`。
 
 ---
 
@@ -242,8 +242,8 @@ $$T^{-1} = \begin{bmatrix} R^T & -R^T t \\ 0 & 1 \end{bmatrix}$$
 | `addJoint` 双向插入 | `EdgeGraph.m` L58-63 |
 | `addMate` 双向插入 + mate 变换 | `EdgeGraph.m` L70-82 |
 | `addClosedMate` 单向插入 | `EdgeGraph.m` L88-98 |
-| `jointTransform` revolute 公式 | `PoseGraph.m` L12-25 |
-| `jointTransform` prismatic 公式 | `PoseGraph.m` L15-19 |
+| `jointTransform` revolute 公式 | `PosePropagator.m` L12-25 |
+| `jointTransform` prismatic 公式 | `PosePropagator.m` L15-19 |
 | `toStruct` 过滤规则 | `EdgeGraph.m` L129-137 |
 | 逆向变换 `localInvT` | `EdgeGraph.m` L214-217 |
 | `Rx(π)` 翻转约定 | `conventions.yaml` → `connection.mate_flip_axis` |

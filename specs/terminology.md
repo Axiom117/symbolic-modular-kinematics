@@ -62,7 +62,8 @@
 | `joint_side` | 关节侧连接面 |
 | `tool` | 工具/功能参考点 |
 | `dock` | 适配/对接面 |
-| `ground` | 世界侧接地系（`Manipulator.ground`），无 `polarity`，由 L3 绑定到 `world`；非机械 mate |
+| `ground` | 世界侧接地系（`Manipulator.ground`），无 `polarity`，由 L3 绑定到 `world`；非机械 mate。不触发 FK root 自动注册 |
+| `root` | FK 传播起点（`ToolPipette.connector_side`），展开时自动调用 `addRoot()`，种子位姿 $T = I_4$ |
 
 ## 端口机械对接（mate）
 

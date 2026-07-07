@@ -1,7 +1,7 @@
 # IR 节点类型规范（阶段 A.3.1）
 
-> 本文档定义 IR（中间表示）图中的节点类型：`body`、`frame`、`joint` 记录以及 `ground` 节点。
-> 权威代码来源：`scripts/matlab/+ir/Expander.m`（`localExpandInstance`）和 `+ir/EdgeGraph.m`（`GroundNodes`）。
+> 本文档定义 IR（中间表示）图中的节点类型：`body`、`frame`、`joint` 记录以及 `root` 节点。
+> 权威代码来源：`scripts/matlab/+ir/Expander.m`（`localExpandInstance`）和 `+ir/EdgeGraph.m`（`RootNodes`）。
 > 元件级定义见 `../modeling-conventions.md` §3；机器可读枚举见 `../conventions.yaml`。
 >
 > **状态**：A.3.1 v0。以已验证的 MATLAB 代码为准反推，非从零设计。
@@ -15,7 +15,7 @@ IR 图中的**节点**分为两类：
 | 类别 | 存储位置 | 说明 |
 |------|------|------|
 | 显式节点 | `Expander.Instances(i).bodies` / `.frames` / `.joints` | 每个模块实例展开后产出的 body、frame、joint 记录 |
-| 隐式节点 | `EdgeGraph.GroundNodes` | 被标记为绑定世界原点的 frame 名列表 |
+| 隐式节点 | `EdgeGraph.RootNodes` | FK 传播的根节点（seed pose = I₄）列表 |
 
 所有节点名均为**实例限定名**（instance-qualified name），格式为 `instanceName.elementName`（如 `frame0.body`、`joint1.linkA`），由 `localExpandInstance` 在展开时通过名前缀 `pre = [iname '.']` 生成。
 
@@ -83,18 +83,27 @@ fList{k} = struct('node', node, 'name', f.name, ...
 - **对称性**：`symmetry` 字段约束装配时的离散滚转选择数。
 - **法向约定**：所有 port 的 +Z 统一朝模块外（见 `../modeling-conventions.md` §9.1）。
 
-### 3.4 Ground 自动注册
+### 3.4 Root 自动注册
 
-当 `semantic_tag = 'ground'` 时，该 frame 在展开时自动注册为 ground node：
+当 `semantic_tag = 'root'` 时，该 frame 在展开时自动注册为 root node：
 
 ```matlab
-% Expander.m L214-216
-if strcmp(core.CommonUtils.field(f, 'semantic_tag', ''), 'ground')
-    obj.EdgeGraph_.addGround(node);
+% Expander.m L299-305
+if strcmp(core.CommonUtils.field(f, 'semantic_tag', ''), 'root')
+    obj.EdgeGraph_.addRoot(node);
 end
 ```
 
-Ground node 在 FK 传播时以 $T = I_4$（世界原点）为初始位姿。
+Root node 在 FK 传播时以 $T = I_4$（世界原点）为初始位姿。
+
+> **标签语义分离**：`semantic_tag: root` 和 `semantic_tag: ground` 是两个不同的标签：
+> - `root`：标记 FK 传播起点，触发 `addRoot()` 自动注册。典型用途：`ToolPipette.tip_origin`
+> - `ground`：标记 L3 世界绑定端点（如 `Manipulator.ground`），用于执行层识别哪些 frame 绑定到世界原点。**不**触发自动 root 注册。
+
+> **工具端生长范式（Tool-Rooted Growth）**
+> 模块化机构的自然装配方向是从工具端向外生长：先确定工具模块（如 `ToolPipette`）的参考系（`semantic_tag: root`），沿连接链向外逐步定位各模块，最终抵达 `Manipulator` 外部驱动端。
+>
+> 若所有模块均无 `semantic_tag: root` frame，则 fallback 到第一个实例的第一个 body 作为 root（见 `dsl-to-ir-mapping.md` §7 Root Fallback）。支持多 root（多次调用 `addRoot()`），适用于多分支 / 并联机构。
 
 ---
 
@@ -129,46 +138,48 @@ jList{k} = struct('node', [pre j.from_frame], ...
 
 ---
 
-## 5. Ground 节点
+## 5. Root 节点
 
 ### 5.1 存储
 
-Ground 节点存储在 `EdgeGraph.GroundNodes` cell array 中：
+Root 节点存储在 `EdgeGraph.RootNodes` cell array 中：
 
 ```matlab
-% EdgeGraph.m L34
-GroundNodes (:,1) cell = {}
+% EdgeGraph.m L37
+RootNodes (:,1) cell = {}
 ```
 
 每个元素为 frame 实例限定名（char）。
 
 ### 5.2 注册方式
 
-1. **自动注册**：展开时 `semantic_tag = 'ground'` 的 frame → `addGround(node)`（Expander.m L214-216）
-2. **手动注册**：调用方直接 `g.addGround(node)`（如 `module.m` 中以第一个 body 为根）
+1. **自动注册**：展开时 `semantic_tag = 'root'` 的 frame → `addRoot(node)`（Expander.m L299-305）
+2. **手动注册**：调用方直接 `g.addRoot(node)`（如 `module.m` 中以第一个 body 为根）
 
 ### 5.3 Fallback 规则
 
-若展开后无任何 ground node，以第一个实例的第一个 body 为根：
+若展开后无任何 root node，以第一个实例的第一个 body 为根：
 
 ```matlab
-% Expander.m L151-153
-if ~obj.EdgeGraph_.hasGroundNodes()
-    obj.EdgeGraph_.addGround(obj.Instances(1).bodies{1}.node);
+% Expander.m L166-168
+if ~obj.EdgeGraph_.hasRootNodes()
+    obj.EdgeGraph_.addRoot(obj.Instances(1).bodies{1}.node);
 end
 ```
 
 ### 5.4 FK 传播行为
 
-Ground node 在 `EdgeGraph.propagate()` 中以 $T = I_4$ 为种子位姿。支持多 ground node（多分支/并联机构）。
+Root node 在 `EdgeGraph.propagate()` 中以 $T = I_4$ 为种子位姿。支持多 root node（多分支/并联机构）。
 
 ```matlab
-% EdgeGraph.m L120-123
-if ~isempty(obj.GroundNodes)
-    for k = 1:numel(obj.GroundNodes)
-        seed(obj.GroundNodes{k}) = eye(4);
+% EdgeGraph.m L121-123
+if ~isempty(obj.RootNodes)
+    for k = 1:numel(obj.RootNodes)
+        seed(obj.RootNodes{k}) = eye(4);
     end
 ```
+
+> **工具端生长范式（Tool-Rooted Growth）**：root node 通常是工具模块（如 `ToolPipette`）的参考 frame，机构从工具端开始沿连接链向外生长，最终抵达 `Manipulator` 驱动端。详见 §3.4。
 
 ---
 
@@ -213,10 +224,10 @@ portName = ref(d(1)+1:end);
 | Body struct 字段 | `Expander.m` L196-201 (`bList{k} = struct(...)`) |
 | Frame struct 字段 | `Expander.m` L204-217 (`fList{k} = struct(...)`) |
 | Joint struct 字段 | `Expander.m` L236-245 (`jList{k} = struct(...)`) |
-| Ground 自动注册 | `Expander.m` L214-216 (`semantic_tag == 'ground'`) |
-| Ground fallback | `Expander.m` L151-153 (`hasGroundNodes()`) |
-| GroundNodes 存储 | `EdgeGraph.m` L34 (`GroundNodes (:,1) cell`) |
-| FK 种子位姿 | `EdgeGraph.m` L120-123 (`seed(...) = eye(4)`) |
+| Root 自动注册 | `Expander.m` L299-301 (`semantic_tag == 'ground'`) |
+| Root fallback | `Expander.m` L166-168 (`hasRootNodes()`) |
+| RootNodes 存储 | `EdgeGraph.m` L37 (`RootNodes (:,1) cell`) |
+| FK 种子位姿 | `EdgeGraph.m` L121-123 (`seed(...) = eye(4)`) |
 | 名前缀生成 | `Expander.m` L192 (`pre = [iname '.']`) |
 | 端口引用解析 | `Expander.m` L254-259 (`localParsePort`) |
 | Body 元件定义 | `conventions.yaml` → `element_types.nodes.body` |

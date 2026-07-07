@@ -9,24 +9,19 @@
 
 ## 1. 总体管线
 
-```
-DSL YAML 文件
-      │
-      ▼  core.readYaml()
-  DSL struct (mechanism / instances / connections)
-      │
-      ▼  ir.Expander 构造函数
-      │
-      ├─► 1. DSL 加载与校验
-      ├─► 2. 模块库路径解析
-      ├─► 3. 参数配置加载
-      ├─► 4. 实例展开（每个 instance → localExpandInstance）
-      ├─► 5. 连接处理（每个 connection → mate 边）
-      ├─► 6. Ground fallback
-      └─► 7. FK 传播
-      │
-      ▼
-  IR 图（EdgeGraph）+ 全局位姿 map（Poses）
+```mermaid
+flowchart TD
+    A["DSL YAML 文件"] --> B["core.readYaml()"]
+    B --> C["DSL struct<br/>(mechanism / instances / connections)"]
+    C --> D["ir.Expander 构造函数"]
+    D --> D1["1. DSL 加载与校验"]
+    D --> D2["2. 模块库路径解析"]
+    D --> D3["3. 参数配置加载"]
+    D --> D4["4. 实例展开<br/>（每个 instance → localExpandInstance）"]
+    D --> D5["5. 连接处理<br/>（每个 connection → mate 边）"]
+    D --> D6["6. Root fallback"]
+    D --> D7["7. FK 传播"]
+    D1 & D2 & D3 & D4 & D5 & D6 & D7 --> E["IR 图（EdgeGraph）+<br/>全局位姿 map（Poses）"]
 ```
 
 管线入口：`ir.Expander(dslYaml, configYaml)`（Expander.m L47）
@@ -223,14 +218,16 @@ fList{k} = struct('node', node, 'name', f.name, ...
 | `frames[].semantic_tag` | `semantic_tag` | `''` |
 | `frames[].symmetry` | `symmetry` | `4` |
 
-**特殊处理 — Ground 自动注册**：
+**特殊处理 — Root 自动注册**：
 
 ```matlab
-% Expander.m L214-216
-if strcmp(core.CommonUtils.field(f, 'semantic_tag', ''), 'ground')
-    obj.EdgeGraph_.addGround(node);
+% Expander.m L299-305
+if strcmp(core.CommonUtils.field(f, 'semantic_tag', ''), 'root')
+    obj.EdgeGraph_.addRoot(node);
 end
 ```
+
+> `semantic_tag: root` 和 `semantic_tag: ground` 是两个不同标签：`root` 触发 root 注册，`ground` 仅标识 L3 世界绑定端点。
 
 ### 5.7 FixedTransform 展开
 
@@ -333,16 +330,18 @@ end
 
 ---
 
-## 7. 步骤 6：Ground Fallback
+## 7. 步骤 6：Root Fallback
 
 ```matlab
-% Expander.m L151-153
-if ~obj.EdgeGraph_.hasGroundNodes()
-    obj.EdgeGraph_.addGround(obj.Instances(1).bodies{1}.node);
+% Expander.m L166-168
+if ~obj.EdgeGraph_.hasRootNodes()
+    obj.EdgeGraph_.addRoot(obj.Instances(1).bodies{1}.node);
 end
 ```
 
-若模块定义中无 `semantic_tag: ground` 的 frame，则以第一个实例的第一个 body 为世界原点。
+若模块定义中无 `semantic_tag: root` 的 frame，则以第一个实例的第一个 body 为 root。
+
+> **工具端生长范式**：在 tool-rooted growth 范式下，工具模块（如 `ToolPipette`）的参考 frame 应标记 `semantic_tag: root` 以自动注册为 root（`ToolPipette.connector_side` 即如此标记）。若忘记标记，此 fallback 会以第一个 DSL 实例的第一个 body 为 root。
 
 ---
 
@@ -354,9 +353,9 @@ obj.Poses = obj.EdgeGraph_.propagate();
 ```
 
 委托 `EdgeGraph.propagate()`：
-1. 以 GroundNodes 为种子（$T = I_4$）
+1. 以 RootNodes 为种子（$T = I_4$）
 2. 调用 `toStruct()` 过滤边（排除 `closed_mate`，剥离 `kind`）
-3. 委托 `PoseGraph.propagatePoses` 执行迭代 FK
+3. 委托 `PosePropagator.propagatePoses` 执行迭代 FK
 
 输出：`containers.Map`，key = frame 实例限定名，value = 4×4 全局位姿。
 
@@ -364,59 +363,41 @@ obj.Poses = obj.EdgeGraph_.propagate();
 
 ## 9. 完整数据流
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ DSL YAML                                                    │
-│   mechanism: open_chain_2r                                  │
-│   instances: {frame0: {type: Frame}, joint1: {type: Joint}}│
-│   connections: [{ports: [frame0.faceXPlus, joint1.linkA]}] │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 参数配置                                                     │
-│   dimensions.yaml → {Frame: {cubeLength: 10}}               │
-│   joint_config.yaml → {joint1: {q: 0.5236}}                │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 实例展开 (localExpandInstance × 2)                           │
-│                                                             │
-│ frame0 [Frame]:                                             │
-│   body:  frame0.body                                        │
-│   frames: frame0.body, frame0.faceXPlus, ...                │
-│   edges:  frame0.body → frame0.faceXPlus (fixed, T=...)    │
-│                                                             │
-│ joint1 [Joint]:                                             │
-│   bodies: joint1.bodyA, joint1.bodyB                        │
-│   frames: joint1.linkA, joint1.linkB, joint1.hingeA, ...   │
-│   edges:  ... (fixed) + joint1.hingeA→joint1.hingeB (joint)│
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 连接处理                                                     │
-│   frame0.faceXPlus (socket) ↔ joint1.linkA (plug)          │
-│   → addMate('frame0.faceXPlus', 'joint1.linkA', 0, 4)      │
-│   → mate 边 (双向, kind='mate')                             │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│ IR 图 (EdgeGraph)                                           │
-│   GroundNodes: {frame0.body}  (fallback)                    │
-│   Edges: [fixed×N, joint×M, mate×2]                        │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│ FK 传播 (EdgeGraph.propagate → PoseGraph.propagatePoses)    │
-│   Poses('frame0.body') = eye(4)                             │
-│   Poses('frame0.faceXPlus') = eye(4) * T_fixed              │
-│   Poses('joint1.linkA') = Poses('frame0.faceXPlus') * T_mate│
-│   ...                                                        │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph dsl["DSL YAML"]
+        DSL1["mechanism: open_chain_2r"]
+        DSL2["instances: frame0: Frame, joint1: Joint"]
+        DSL3["connections: frame0.faceXPlus ↔ joint1.linkA"]
+    end
+    dsl --> cfg["参数配置"]
+    subgraph cfg["参数配置"]
+        CFG1["dimensions.yaml → Frame: {cubeLength: 10}"]
+        CFG2["joint_config.yaml → joint1: {q: 0.5236}"]
+    end
+    cfg --> expand["实例展开 (localExpandInstance × 2)"]
+    subgraph expand["实例展开"]
+        E1["frame0 [Frame]: body + frames +<br/>body→faceXPlus (fixed, T=...)"]
+        E2["joint1 [Joint]: bodyA/B + linkA/B +<br/>hingeA→hingeB (joint) + fixed"]
+    end
+    expand --> connect["连接处理"]
+    subgraph connect["连接处理"]
+        C1["frame0.faceXPlus (socket) ↔ joint1.linkA (plug)"]
+        C2["addMate('frame0.faceXPlus', 'joint1.linkA', 0, 4)"]
+        C3["mate 边 (双向, kind='mate')"]
+    end
+    connect --> ir["IR 图 (EdgeGraph)"]
+    subgraph ir["IR 图"]
+        IR1["RootNodes: {frame0.body} (fallback)"]
+        IR2["Edges: [fixed×N, joint×M, mate×2]"]
+    end
+    ir --> fk["FK 传播<br/>EdgeGraph.propagate → PosePropagator.propagatePoses"]
+    subgraph fk["FK 传播"]
+        FK1["Poses('frame0.body') = eye(4)"]
+        FK2["Poses('frame0.faceXPlus') = eye(4) * T_fixed"]
+        FK3["Poses('joint1.linkA') = Poses('frame0.faceXPlus') * T_mate"]
+        FK4["..."]
+    end
 ```
 
 ---
@@ -434,12 +415,12 @@ obj.Poses = obj.EdgeGraph_.propagate();
 | 模块定义加载 + 缓存 | `Expander.m` L166-175 |
 | Body 展开 | `Expander.m` L196-201 |
 | Frame 展开 | `Expander.m` L204-217 |
-| Ground 自动注册 | `Expander.m` L214-216 |
+| Root 自动注册 | `Expander.m` L299-305 (`semantic_tag == 'root'`) |
 | FixedTransform 展开 | `Expander.m` L220-226 |
 | Joint 展开 | `Expander.m` L229-245 |
 | 端口引用解析 | `Expander.m` L254-259 |
 | Frame 查找 | `Expander.m` L262-273 |
 | 极性校验 | `Expander.m` L121-133 |
 | Mate 边插入（含 closed 判断） | `Expander.m` L136-144 |
-| Ground fallback | `Expander.m` L151-153 |
+| Root fallback | `Expander.m` L166-168 |
 | FK 传播 | `Expander.m` L154 → `EdgeGraph.propagate` |

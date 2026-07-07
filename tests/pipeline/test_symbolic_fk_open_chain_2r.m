@@ -1,10 +1,10 @@
 %% test_symbolic_fk_open_chain_2r.m
 % End-to-end test: DSL → symbolic IR → symbolic FK → numeric verification.
 %
-% Verifies that the symbolic FK pipeline (ir.Expander in symbolicMode +
-% ir.SymbolicFK) produces end-frame pose expressions that, when evaluated
-% at the joint values from joint_config.yaml, match the numeric FK output
-% from the default (numeric) Expander to within 1e-12.
+% Verifies the pure symbolic pipeline (A.4.0): ir.Expander always produces
+% symbolic Poses; evaluateNumeric() substitutes joint values from config.
+% The symbolic FK output, when evaluated at joint_config.yaml values,
+% matches numeric FK to within 1e-12.
 %
 % Requires: Symbolic Math Toolbox
 %
@@ -19,10 +19,10 @@ dslFile    = '../../specs/dsl/examples/open-chain-2r/robot_description.yaml';
 configFile = '../../specs/dsl/examples/open-chain-2r/joint_config.yaml';
 modLib     = '../../specs/modules/';
 
-%% 1. Build numeric reference (default Expander, symbolicMode=false)
+%% 1. Build numeric reference (symbolic expansion + evaluateNumeric)
 fprintf('1. Building numeric reference pipeline ... ');
-eNum = ir.Expander(dslFile, configFile);
-numPoses = eNum.Poses;
+eNum = ir.Expander(dslFile);
+numPoses = eNum.evaluateNumeric(configFile);
 fprintf('OK (%d instances, %d edges, %d poses)\n', ...
     numel(eNum.Instances), eNum.EdgeGraph_.numEdges, numPoses.Count);
 
@@ -32,10 +32,10 @@ T_num_ref = numPoses(endFrame);
 fprintf('   Numeric T_end (ref):\n');
 disp(T_num_ref);
 
-%% 2. Build symbolic pipeline (symbolicMode=true)
+%% 2. Build symbolic pipeline (pure symbolic, always-on)
 fprintf('\n2. Building symbolic pipeline ... ');
 try
-    eSym = ir.Expander(dslFile, '', true);
+    eSym = ir.Expander(dslFile);
 catch ME
     if contains(ME.message, 'Unrecognized function or variable') && contains(ME.message, 'sym')
         error('Symbolic Math Toolbox required. Install it to run this test.');
@@ -44,24 +44,26 @@ catch ME
 end
 fprintf('OK\n');
 
-%% 3. Verify SymbolVars contains expected joint variables
-fprintf('\n3. Checking SymbolVars ... ');
-svFields = fieldnames(eSym.SymbolVars);
-fprintf('%d symbolic variables registered: %s\n', ...
-    numel(svFields), strjoin(svFields, ', '));
-assert(numel(svFields) >= 2, 'Expected at least 2 joint variables (joint1.q, joint2.q).');
+%% 3. Verify JointVarMap contains expected joint variables
+fprintf('\n3. Checking JointVarMap ... ');
+jvKeys = keys(eSym.JointVarMap);
+fprintf('%d joint variables in JointVarMap: %s\n', ...
+    numel(jvKeys), strjoin(jvKeys, ', '));
+assert(numel(jvKeys) >= 2, 'Expected at least 2 joint variables in JointVarMap.');
+assert(isKey(eSym.JointVarMap, 'joint1.q'), 'joint1.q missing from JointVarMap.');
+assert(isKey(eSym.JointVarMap, 'joint2.q'), 'joint2.q missing from JointVarMap.');
 
-%% 4. Run SymbolicFK
-fprintf('\n4. Running SymbolicFK to endFrame="%s" ... ', endFrame);
-fk = ir.SymbolicFK(eSym.EdgeGraph_, endFrame);
+%% 4. Run TaskFrame
+fprintf('\n4. Running TaskFrame to endFrame="%s" ... ', endFrame);
+tf = ir.TaskFrame(eSym.EdgeGraph_, endFrame);
 fprintf('OK\n');
-fprintf('   JointVars: %s\n', strjoin(string(fk.JointVars), ', '));
-fprintf('   TSym type: %s, size: %dx%d\n', class(fk.TSym), size(fk.TSym));
+fprintf('   JointVars: %s\n', strjoin(string(tf.JointVars), ', '));
+fprintf('   TSym type: %s, size: %dx%d\n', class(tf.TSym), size(tf.TSym));
 
 %% 5. Verify TSym is symbolic (contains trig terms)
 fprintf('\n5. Verifying TSym is symbolic ... ');
-assert(isa(fk.TSym, 'sym'), 'TSym must be sym type.');
-ts = char(fk.TSym);
+assert(isa(tf.TSym, 'sym'), 'TSym must be sym type.');
+ts = char(tf.TSym);
 assert(contains(ts, 'cos') || contains(ts, 'sin'), ...
     'TSym should contain trig terms from revolute joints.');
 fprintf('OK (contains trig functions)\n');
@@ -76,9 +78,10 @@ q2_val = jointCfg.joint2.q;   % -0.7854
 
 fprintf('   joint1.q = %.6f rad, joint2.q = %.6f rad\n', q1_val, q2_val);
 
-% symvar returns vars in alphabetical order: joint1.q, joint2.q
+% symvar returns vars in alphabetical order: joint1_q, joint2_q
+% (MATLAB makeValidName replaces '.' with '_' in sym variable names)
 vals_numeric = [q1_val; q2_val];
-T_num_from_sym = fk.eval(vals_numeric);
+T_num_from_sym = tf.eval(vals_numeric);
 
 fprintf('   T_end from symbolic FK (evaluated):\n');
 disp(T_num_from_sym);
@@ -93,8 +96,8 @@ assert(maxErr < 1e-12, ...
 
 %% 8. Verify position and rotation decomposition
 fprintf('\n8. Checking PosExpr / RotExpr decomposition ... ');
-p_sym = fk.evalPos(vals_numeric);
-R_sym = fk.evalRot(vals_numeric);
+p_sym = tf.evalPos(vals_numeric);
+R_sym = tf.evalRot(vals_numeric);
 assert(norm(p_sym - T_num_ref(1:3,4)) < 1e-12, 'PosExpr mismatch.');
 assert(norm(R_sym - T_num_ref(1:3,1:3)) < 1e-12, 'RotExpr mismatch.');
 fprintf('OK (position + rotation match)\n');

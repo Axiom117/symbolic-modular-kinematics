@@ -99,6 +99,17 @@
 - **L0 元件（Element）**：建模原语，即 `Body`、`Frame`、`Port`、`FixedTransform`、`Joint`、`Constraint`。类比 Simscape 基本块或 URDF 基本类型，是体系最底层、不可再分的语素。
 - **L1 模块（Module）**：把若干元件封装成的**参数化模板**，相当于一个类——定义一次、多次实例化。参考来源是 `slx_module_reference` 的库模块（`Frame`、`Pin`、`Joint`、`Adaptor`、`ToolPipette`），类比 Simulink 的 masked subsystem / library，或 OOP 的类加 xacro 宏。注意模块层的「`Frame` 模块」与元件层的「`Frame` 坐标系」同名但不同物。模块对外只暴露 `Port`。
 - **L2 机构（Mechanism）**：多个模块实例按端口连接组成的机构本体，类比 Simulink 子系统。机构只描述「本体长什么样、怎么拼」，可以是开环（树）或含闭环（一般图）。
+
+  **FK 传播范式：工具端生长（Tool-Rooted Growth）**
+
+  正向运动学（FK）传播需要一个起点（root node），以此处 $T = I_4$ 为种子沿图边向外传播位姿。与传统机器人学「基座固定」的思路不同，模块化机构的自然装配方向是**从工具端向外生长**：
+
+  - 先确定工具模块（如 `ToolPipette`）的参考坐标系 → 沿连接链逐步定位相邻模块 → 最终抵达 `Manipulator` 外部驱动端
+  - FK 传播的 root node 由 `semantic_tag: root` 标记（如 `ToolPipette.tip_origin`），该 frame 在展开时自动调用 `addRoot()` 注册
+  - `semantic_tag: ground`（如 `Manipulator.ground`）是**不同的标签**，用于标识 L3 世界绑定端点，**不**触发自动 root 注册——两个标签语义分离：`root` 管 FK 传播起点，`ground` 管 L3 接地端点识别
+  - 若所有模块均无 `semantic_tag: root` 的 frame，则 fallback 到第一个 DSL 实例的第一个 body 作为 root；支持多 root（多次调用 `addRoot()`），适用于多分支 / 并联机构
+
+  此范式将机构视为从效应器（end-effector）倒推回驱动源的有向图，而非从基座正向生长的串联链——更贴合工具优先的模块化设计思维。
 - **L3 执行层（Execution）**：把机构本体接入世界系与驱动源，闭合成自洽、可求解的系统。它定义「机构如何被固定、如何被驱动、闭环判据是什么」。
   - **世界系闭环（M-REx 主构型，主导模式）**：当前绝大多数模块化 M-REx 配置采用此模式。机构本体在 DSL 中描述为**开环链**（不写 `closed: true`），挂载到多台外部驱动器（`Manipulator` 模块）上。每台 `Manipulator` 的 `ground` frame 在 L3 绑定到同一 `world` 原点，形成回路 `世界原点 → 驱动 #1 → 机构本体 → 驱动 #2 → 世界原点`。**闭合不发生在模块端口之间，而发生在世界原点**——因为两条独立树共享同一 `world` 根。闭合判据为 L3 `closure_cuts` 声明的切口处相对位姿残差。外部驱动器由 `Manipulator` 关节模块物化（内部三个 `prismatic` 组合成 3-DOF 笛卡尔驱动，机构侧以 `socket` 对接，世界侧以 `ground` frame 由 L3 绑定到 `world`）。
   - **L2 内部闭环（四杆环等，辅助验证模式）**：机构本体在 DSL 中即含 `closed: true` 标记，回路在模块端口之间闭合。主要用于验证 A.4 的回路识别与约束构造逻辑，不是实际 M-REx 部署的目标构型。
@@ -283,7 +294,7 @@ DSL 定位为 L2 纯拓扑——只描述机构本体由哪些模块实例组成
 ### 阶段 A.3 · 解释器 v0：先跑通开环
 
 > **状态**：A.2.5 可视化代码中已完成 IR 展开的数值实现（`localExpandInstance` + `EdgeGraph` +
-> `PoseGraph` 三层架构）。A.3 的核心工作是将这套已验证的展开逻辑解耦为独立模块，升级为符号 FK
+> `PosePropagator` 三层架构）。A.3 的核心工作是将这套已验证的展开逻辑解耦为独立模块，升级为符号 FK
 > 生成，并补齐变量注册、执行配置、结构校验等外围设施。
 
 #### 现有基础（A.2.5 中已完成，可复用）
@@ -294,22 +305,20 @@ DSL 定位为 L2 纯拓扑——只描述机构本体由哪些模块实例组成
 | 参数绑定 | `+core/CommonUtils.m` → `evalScalar`/`evalVec` | 符号表达式求值：`cubeLength/2` → 数值 |
 | 参数注入 | `+viz/mechanism.m` L60-70 | `dimensions.yaml`（按 module_type）+ per-example `joint_config.yaml`（按实例名覆盖） |
 | 端口连接 → mate 边 | `+viz/mechanism.m` L105-137 | 极性校验 + `Rx(π)·Rz(roll)` mate 变换 + `addMate`/`addClosedMate` |
-| IR 图累积器 | `+ir/EdgeGraph.m` | handle class：body/frame/joint 节点，fixed/joint/mate/closed_mate 边，ground nodes，传播 |
-| FK 传播引擎 | `+core/PoseGraph.m` | `propagatePoses`：迭代 FK，当前为**数值**计算 |
+| IR 图累积器 | `+ir/EdgeGraph.m` | handle class：body/frame/joint 节点，fixed/joint/mate/closed_mate 边，root nodes，传播 |
+| FK 传播引擎 | `+core/PosePropagator.m` | `propagatePoses`：迭代 FK，当前为**数值**计算 |
 | 旋转表示求值 | `+core/RigidBodyMath.m` → `rot` | 支持 align / rpy / axis_angle 三种表示 |
-| Ground node 自动注册 | `+viz/mechanism.m` L313-315 | 检测 `semantic_tag: ground` → 自动 `g.addGround()` |
+| Root node 自动注册 | `ir.Expander` → `localExpandInstance` | 检测 `semantic_tag: ground` → 自动 `g.addRoot()` |
 | 模块库加载 + 缓存 | `+viz/mechanism.m` → `defCache` | `containers.Map` 按 module_type 缓存 |
 
 #### A.3 修订路线图总览
 
-```
-A.3.0  解耦重构       A.3.1  IR 规范化      A.3.2  符号 FK 引擎     A.3.3  变量与配置       A.3.4  校验与验证
-┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│ 抽出 IR 展开  │    │ 写 6 份 IR   │    │ 数值→符号    │    │ symbolRegistry│    │ 结构校验     │
-│ 为独立模块    │ →  │ 正式规范     │ →  │ FK 表达式    │ →  │ execution-   │ →  │ 端到端验证   │
-│              │    │              │    │ 生成         │    │ config       │    │              │
-└──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
-     1-2h               2-3h               3-4h               2-3h               2-3h
+```mermaid
+flowchart LR
+    A["<b>A.3.0</b><br/>解耦重构<br/>抽出 IR 展开<br/>为独立模块<br/><i>1-2h</i>"] --> B["<b>A.3.1</b><br/>IR 规范化<br/>写 6 份 IR<br/>正式规范<br/><i>2-3h</i>"]
+    B --> C["<b>A.3.2</b><br/>符号 FK 引擎<br/>数值→符号<br/>FK 表达式生成<br/><i>3-4h</i>"]
+    C --> D["<b>A.3.3</b><br/>变量与配置<br/>symbolRegistry +<br/>execution-config<br/><i>2-3h</i>"]
+    D --> E["<b>A.3.4</b><br/>校验与验证<br/>结构校验 +<br/>端到端验证<br/><i>2-3h</i>"]
 ```
 
 ---
@@ -345,7 +354,7 @@ A.3.0  解耦重构       A.3.1  IR 规范化      A.3.2  符号 FK 引擎     A
 |------|------|------|
 | `specs/ir/node-types.md` | body（name/geometry）、frame（host/exposed/polarity/semantic_tag/symmetry）、joint（kind/axis/variable/observable） | `EdgeGraph.Edges` struct 字段 + `localExpandInstance` 组装的 bList/fList/jList |
 | `specs/ir/edge-types.md` | kind 枚举（`fixed`/`joint`/`mate`/`closed_mate`）、双向边插入规则、`toStruct()` 过滤规则 | `EdgeGraph.addFixedTransform`/`addJoint`/`addMate`/`addClosedMate`/`toStruct` |
-| `specs/ir/dsl-to-ir-mapping.md` | 实例展开规则、连接翻译规则、参数代入规则、`semantic_tag: ground` → `GroundNodes` 映射 | `localExpandInstance` 全函数 |
+| `specs/ir/dsl-to-ir-mapping.md` | 实例展开规则、连接翻译规则、参数代入规则、`semantic_tag: ground` → `RootNodes` 映射 | `localExpandInstance` 全函数 |
 | `specs/ir/port-attachment.md` | mate 变换在 IR 中的边类型区分：`addMate`（双向，参与传播）/ `addClosedMate`（单向，诊断专用） | `EdgeGraph.addMate`/`addClosedMate` |
 | `specs/ir/symbol-registry.md` | `observable` flag → 变量收集规则、实例限定名格式、类型分类（geometric/joint/task） | A.3.3 中实现 `symbolRegistry` 后以代码为准编写 |
 | `specs/schema/ir-graph.schema.yaml` | 基于 EdgeGraph 展开后的 struct 结构编写 JSON Schema | `toStruct()` 输出格式 |
@@ -360,8 +369,8 @@ A.3.0  解耦重构       A.3.1  IR 规范化      A.3.2  符号 FK 引擎     A
 
 具体任务：
 
-- 新建 `+ir/SymbolicFK.m`：接收 `EdgeGraph`（展开后的 IR 图），逐边累积符号 4×4 变换矩阵
-- 复用现有的 FK 传播拓扑（`PoseGraph.propagatePoses` 的遍历逻辑），但每步累积使用 MATLAB Symbolic Math Toolbox 的 `sym` 类型
+- 新建 `+ir/TaskFrame.m`：接收 `EdgeGraph`（展开后的 IR 图），逐边累积符号 4×4 变换矩阵
+- 复用现有的 FK 传播拓扑（`PosePropagator.propagatePoses` 的遍历逻辑），但每步累积使用 MATLAB Symbolic Math Toolbox 的 `sym` 类型
 - 关节变量（`q`, `dx`, `dy`, `dz`）注册为 `syms` 符号变量
 - 几何参数（`cubeLength`, `tipDistance`）保留为 `sym` 常数（数值化后用 `sym(...)` 包装，保持类型一致）
 - 输出末端 frame 的符号位姿矩阵 $T_{\text{end}} \in \mathbb{R}^{4\times 4}$ 及分解后的位置/姿态表达式
@@ -371,7 +380,7 @@ A.3.0  解耦重构       A.3.1  IR 规范化      A.3.2  符号 FK 引擎     A
 
 | 文件 | 内容 |
 |------|------|
-| `+ir/SymbolicFK.m` | 符号 FK 引擎：EdgeGraph → 末端 frame 符号位姿表达式 |
+| `+ir/TaskFrame.m` | 符号 FK 引擎：EdgeGraph → 末端 frame 符号位姿表达式 |
 | `tests/pipeline/test_symbolic_fk_open_chain_2r.m` | 对 open-chain-2r 验证符号 FK 表达式与手工推导一致 |
 
 过关标准：
@@ -422,15 +431,15 @@ A.3.0  解耦重构       A.3.1  IR 规范化      A.3.2  符号 FK 引擎     A
 
 - 新建 `+ir/Validator.m`，实现以下校验（基于展开后的 IR 图）：
   - **引用完整性**：所有 `frame.host` 引用的 `body` 存在；所有 `fixedTransform`/`joint` 的 `from_frame`/`to_frame` 引用的 frame 或 body 存在
-  - **连通性**：从 `world`（ground nodes）出发可到达所有 `body` 节点（无孤立子图）
-  - **Ground node 存在性**：至少有一个 ground node
+  - **连通性**：从 root nodes 出发可到达所有 `body` 节点（无孤立子图）
+  - **Root node 存在性**：至少有一个 root node
   - **类型一致性**：`joint` 的 `from_frame`/`to_frame` 不能是 `exposed` frame（当前约定：joint 两端为模块内部 hinge frame，不直接接 port）
   - **symbolRegistry 无冲突**：同一变量名不被重复注册为不同类型
 - 对三个 DSL 示例执行全管线验证：
   1. DSL 语法校验（A.2 `mechanism-assembly.schema.yaml`）
   2. IR 展开（`ir.Expander`）
   3. IR 结构校验（`ir.Validator`）
-  4. 符号 FK 生成（`ir.SymbolicFK`）
+  4. 符号 FK 生成（`ir.TaskFrame`）
   5. 数值代入验证（与 `viz.mechanism` 数值结果对比）
 - 编写测试脚本自动化上述流程
 
@@ -575,16 +584,27 @@ A.3.0  解耦重构       A.3.1  IR 规范化      A.3.2  符号 FK 引擎     A
 
 **集成策略**：
 
-```
-PathPlanner 现有架构                    替换后
-─────────────────────────────         ─────────────────────────────
- configs/ (robot/sim/controller/comm)  → 不变（参数映射到 DSL 实例参数）
- PathPlannerClient (TCP + 路径规划)     → 不变
- Simulink IK/FK Solver                 → 替换为符号求解管线
-   ├── model_2R_RCM_IK.slx             → DSL 机构文件 + execution-config
-   └── model_2R_RCM_FK.slx             → (同上，切换 open_loop 模式)
- PATH_DATA 打包 / 轨迹下发              → 不变
- ControllerPanel TCP Server             → 不变
+```mermaid
+flowchart LR
+    subgraph existing["PathPlanner 现有架构"]
+        E1["configs/<br/>(robot/sim/controller/comm)"]
+        E2["PathPlannerClient<br/>(TCP + 路径规划)"]
+        E3["Simulink IK/FK Solver<br/>├ model_2R_RCM_IK.slx<br/>└ model_2R_RCM_FK.slx"]
+        E4["PATH_DATA 打包/轨迹下发"]
+        E5["ControllerPanel TCP Server"]
+    end
+    subgraph replaced["替换后"]
+        R1["不变<br/>（参数映射到 DSL 实例参数）"]
+        R2["不变"]
+        R3["替换为符号求解管线<br/>├ DSL 机构文件 + execution-config<br/>└ (同上，切换 open_loop 模式)"]
+        R4["不变"]
+        R5["不变"]
+    end
+    E1 --> R1
+    E2 --> R2
+    E3 --> R3
+    E4 --> R4
+    E5 --> R5
 ```
 
 **具体任务**：
@@ -650,3 +670,4 @@ PathPlanner 现有架构                    替换后
 - DSL v0 可以看出还是模仿的 xacro 中对于机构定义和组装的思路，但是在最终版的 DSL 中，可以考虑加入3D体素化的机构构建思路。在当前的DSL中，机构的定义是基于模块和连接的，而在3D体素化的思路中，可以将机构视为由体素组成的三维网格，每种模块都可以用一个或多个体素来表示。而模块间的连接关系可以通过体素之间的邻接关系来自动判断，从而简化DSL的语法并最大化利用体素系统的优势。在我的世界等基于体素的模型构建系统中，存在很多算法来生成连续合理的结构，这些算法可以被借鉴到DSL中，以便更好地支持复杂机构的定义和组装。这样基于体素架构开发一套全新的robogrammar，来定义模块化机构的配置，比如定义三维空间网格为设计空间，每一个单元都可以是0或其他编码，表示不同类型的模块以及局部变换（模块连接时定义的roll参数），这样可以更加简洁高效且直观地定义空间闭环机构。也能够更好的支持后续基于运动模式与自由度的机构自动生成算法。
 - 当然现在的主要任务是尽快完成全新运动学算法的开发和验证，替代yaml和slx的模块化机构定义和求解流程，后续可以考虑在此基础上加入体素化的思路来进一步优化DSL的表达能力和可扩展性。
 - 虽然最早版本的DSL语法中规定任何表示exposed port如果悬空就会报错（即没有连接任何其他port），但是考虑到frame六个外露的port不会总是全部连接上其他模块，所以修改语法定义加入了接口极性的概念，设定所有frame和manipulator的port（在现实中对应磁性不锈钢贴片）是socket，只允许对接joint和pin上的plug端口，而同极性是不允许相连的。现在可以再加一个约束，即虽然frame上的socket可以悬空，但是任何plug都不能悬空，必须连接到一个socket上。这样可以保证机构的闭环约束和运动学求解的正确性，同时也符合现实中模块化机构的设计原则。
+- 在完成阶段 A.5 的集成验证后，后面需要加入类似MRF 2.4的动态可视化功能，显示机构运动的实时状态。后续可以集成到PathPlanner的GUI中，在用户操作时实时显示机构的运动状态和约束情况。
