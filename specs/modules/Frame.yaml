@@ -25,6 +25,7 @@ parameters:
 bodies:
   - name: frame_hyper_cube
     geometry: assets/frame_hyper_cube.stl
+    observable: true
 
 # --- 端口框架表 · 六面端口（均为 exposed frame，polarity: socket）---
 frames:

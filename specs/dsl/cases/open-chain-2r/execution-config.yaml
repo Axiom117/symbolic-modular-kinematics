@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../../schema/execution-config.schema.yaml
+# open-chain-2r 执行配置 — 开环 FK 模式
+#
+# 求解方向：FK（已知关节角度 → 计算末端位姿）
+# 详细文档见同目录 README.md
+
+mode: open_loop
+endFrame: frame2.frame_hyper_cube
+
+# 驱动关节：两个 revolute joint 均为已知输入
+actuated_joints:
+  - joint1.q
+  - joint2.q
+
+# 变量分区
+known:
+  - joint1.q
+  - joint2.q
+
+unknown:
+  - frame2.frame_hyper_cube
+
+# 收敛阈值（FK 模式下仅用于后续 IK 参考）
+tolerances:
+  translation_mm: 0.001
+  rotation_rad: 0.001

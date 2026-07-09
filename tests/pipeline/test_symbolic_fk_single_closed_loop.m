@@ -44,13 +44,13 @@ assert(isKey(eSym.JointVarMap, 'joint_BD.q'), 'joint_BD.q missing.');
 assert(isKey(eSym.JointVarMap, 'joint_CD.q'), 'joint_CD.q missing.');
 assert(isKey(eSym.JointVarMap, 'joint_AC.q'), 'joint_AC.q missing.');
 
-%% 3. Run TaskFrame to extract end-frame symbolic pose
+%% 3. Run KinematicModel to extract end-frame symbolic pose
 %   Link A (A1) is grounded; D2 is reachable via tree edges:
 %   A1 → joint_AB → B1 → B2 → joint_BD → D1 → D2.
 %   The closed chord (joint_AC → A3) is excluded from FK propagation.
 endFrame = 'frame_link_D2.frame_hyper_cube';
-fprintf('\n3. Running TaskFrame to endFrame="%s" ... ', endFrame);
-tf = ir.TaskFrame(eSym.EdgeGraph_, endFrame);
+fprintf('\n3. Running KinematicModel to endFrame="%s" ... ', endFrame);
+tf = solver.KinematicModel(eSym.EdgeGraph_, endFrame, eSym.JointVarMap);
 fprintf('OK\n');
 fprintf('   JointVars on FK path: %s\n', strjoin(string(tf.JointVars), ', '));
 fprintf('   TSym type: %s, size: %dx%d\n', class(tf.TSym), size(tf.TSym));
@@ -77,31 +77,33 @@ assert(isequal(tf.TSym(1:3,4), tf.PosExpr), 'TSym(1:3,4) ≠ PosExpr.');
 assert(isequal(tf.TSym(1:3,1:3), tf.RotExpr), 'TSym(1:3,1:3) ≠ RotExpr.');
 
 % Evaluate at joint_config values (default all-zero pose) as numeric sanity check.
-% symvar returns vars in alphabetical order; map config values accordingly.
+% Use JointVarMap (canonical name → sym) to map config values by name,
+% eliminating the fragile symvar alphabetical-order dependency.
 jointCfg = core.readYaml(configFile);
-jvSym = tf.JointVars;  % sym array, alphabetical order
-vals_numeric = zeros(numel(jvSym), 1);
-for i = 1:numel(jvSym)
-    varName = char(jvSym(i));
-    % symvar replaces '.' with '_' → reverse to get canonical key: 'joint_AB.q' etc.
-    canonicalName = strrep(varName, '_', '.');
-    if isfield(jointCfg, extractBefore(canonicalName, '.'))
-        instCfg = jointCfg.(extractBefore(canonicalName, '.'));
-        fieldName = extractAfter(canonicalName, '.');
-        if isfield(instCfg, fieldName)
-            vals_numeric(i) = instCfg.(fieldName);
+vMap = containers.Map();
+instNames = fieldnames(jointCfg);
+for ii = 1:numel(instNames)
+    iname = instNames{ii};
+    ov = jointCfg.(iname);
+    if ~isstruct(ov); continue; end
+    varNames = fieldnames(ov);
+    for jj = 1:numel(varNames)
+        canonicalName = [iname '.' varNames{jj}];
+        if isKey(eSym.JointVarMap, canonicalName)
+            vMap(canonicalName) = ov.(varNames{jj});
         end
     end
 end
 
-T_num = tf.eval(vals_numeric);
-p_num = tf.evalPos(vals_numeric);
-R_num = tf.evalRot(vals_numeric);
+T_num = tf.eval(vMap);
+p_num = tf.evalPos(vMap);
+R_num = tf.evalRot(vMap);
 
 fprintf('OK\n');
 fprintf('   Joint values (all zero pose, straight-line configuration):\n');
-for i = 1:numel(jvSym)
-    fprintf('     %s = %.4f\n', char(jvSym(i)), vals_numeric(i));
+vKeys = keys(vMap);
+for i = 1:numel(vKeys)
+    fprintf('     %s = %.4f\n', vKeys{i}, vMap(vKeys{i}));
 end
 fprintf('   T_end (evaluated):\n');
 disp(T_num);

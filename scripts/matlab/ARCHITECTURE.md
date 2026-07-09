@@ -4,7 +4,7 @@
 
 ## 架构总览
 
-项目采用**四层架构**，自上而下为：可视化层 → 中间表示层（编排 + 图累积 + 符号 FK）→ 核心计算层。`TaskFrame` 作为符号 FK 的侧路入口，直接读取图累积层的符号位姿。
+项目采用**四层架构**，自上而下为：可视化层 → 中间表示层（编排 + 图累积 + 符号 FK + 执行配置）→ 核心计算层。`KinematicModel` 作为符号 FK 的侧路入口，`ExecutionConfig` 作为求解变量分区器，两者协作将符号位姿映射到具体的 FK/IK 求解问题。
 
 ```mermaid
 graph TB
@@ -23,9 +23,10 @@ graph TB
     %% ── 中间表示层 ──
     subgraph ir_layer["+ir/ 中间表示层"]
         direction LR
-        expander["<b>Expander</b> · Orchestrator<br/>构造函数即完整管线<br/>① 加载 DSL + module library<br/>② localExpandInstance 实例展开<br/>③ mate / closed-mate 连接处理<br/>④ propagate → Poses (sym)<br/>evaluateNumeric() 延迟数值代入"]
+        expander["<b>Expander</b> · Orchestrator<br/>构造函数即完整管线<br/>① 加载 DSL + module library<br/>② localExpandInstance 实例展开<br/>③ mate / closed-mate 连接处理<br/>④ propagate → Poses (sym)<br/>⑤ 输出 SymbolRegistry<br/>evaluateNumeric() 延迟数值代入"]
         edgegraph["<b>EdgeGraph</b> · Accumulator<br/>addFixedTransform / addJoint<br/>addMate / addClosedMate<br/>kind 元数据 + root nodes<br/>propagate → toStruct → PosePropagator<br/>兼容 double / sym 混合 T 矩阵"]
-        taskframe["<b>TaskFrame</b><br/>符号 FK 薄封装<br/>读 sym 位姿 map<br/>拆 TSym / PosExpr / RotExpr<br/>eval(vals) 数值求值"]
+        kinmodel["<b>KinematicModel</b><br/>符号 FK 薄封装<br/>读 sym 位姿 map<br/>拆 TSym / PosExpr / RotExpr<br/>eval(vals) 数值求值<br/>formulateProblem(cfg) → 求解问题"]
+        execcfg["<b>ExecutionConfig</b><br/>L3 执行配置<br/>加载 + Schema 校验<br/>交叉校验 symbolRegistry<br/>partitionVariables()<br/>getSolvingDirection()"]
     end
 
     %% ── 核心计算层 ──
@@ -37,12 +38,14 @@ graph TB
     mech       -->|"new Expander(dslYaml)"| expander
     mech       -->|"evaluateNumeric(configYaml)"| expander
     expander   -->|"持有 EdgeGraph_ 句柄<br/>addFixedTransform / addJoint / ..."| edgegraph
+    expander   -.->|"输出 SymbolRegistry"| execcfg
     edgegraph  -->|"toStruct() 过滤 closed_mate<br/>→ propagatePoses()"| poseprop
-    taskframe  -.->|"读取 sym 位姿 map"| edgegraph
+    kinmodel  -.->|"读取 sym 位姿 map"| edgegraph
+    kinmodel  -->|"formulateProblem()"| execcfg
     mod        -->|"addFixedTransform / addJoint / addRoot"| edgegraph
 
     class mech,mod viz
-    class expander,edgegraph,taskframe ir
+    class expander,edgegraph,kinmodel,execcfg ir
     class poseprop core
 ```
 
@@ -51,8 +54,10 @@ graph TB
 > 2. 渲染前调用 `e.evaluateNumeric(configYaml)` → 将符号位姿代入关节数值，得到 `double` 位姿 map
 > 3. `Expander` 内部持有 `EdgeGraph_` 句柄，所有实例展开/连接处理均写入该图
 > 4. `EdgeGraph.propagate()` 委托 `PosePropagator.propagatePoses()` 执行纯数学 FK
-> 5. `TaskFrame` 是符号 FK 的独立入口：直接读取 `EdgeGraph` 的 sym 位姿，不经过 Expander
+> 5. `KinematicModel` 是符号 FK 的独立入口：直接读取 `EdgeGraph` 的 sym 位姿，不经过 Expander
 > 6. `module.m` 跳过 Expander，直接调用 `EdgeGraph` 方法构建单模块内部图
+> 7. `Expander` 输出 `SymbolRegistry`（所有 observable 变量清单）→ `ExecutionConfig` 交叉校验
+> 8. `KinematicModel.formulateProblem(cfg)` 读取 `ExecutionConfig` 的 known/unknown 分区，构造 FK 求值函数或 IK 残差函数
 
 ## 各层职责
 
@@ -65,7 +70,7 @@ graph TB
 
 ### 编排层：`+ir/Expander` (handle class，A.3.0 新增，A.4.0 纯符号化)
 
-- **为什么独立为编排层**：原先 DSL 解析、实例展开、参数注入、连接处理全部内嵌在 `+viz/mechanism.m` 的 setup 区段和 local functions 中。A.3.0 将其抽离为独立的 `ir.Expander`，使可视化层变为纯消费者，符号管线（`TaskFrame`）也可复用同一套展开逻辑。
+- **为什么独立为编排层**：原先 DSL 解析、实例展开、参数注入、连接处理全部内嵌在 `+viz/mechanism.m` 的 setup 区段和 local functions 中。A.3.0 将其抽离为独立的 `ir.Expander`，使可视化层变为纯消费者，符号管线（`KinematicModel`）也可复用同一套展开逻辑。
 - **为什么是 handle class**：与 `EdgeGraph` 同理——内部持有 `EdgeGraph_` 和 `DefCache_` 两个可变状态，handle 语义避免在多步展开中反复传入传出。
 - **A.4.0 纯符号化**：移除了 `symbolicMode` 开关，关节变量**始终**创建为 `sym` 对象，`Poses` 始终为符号位姿 map。数值代入推迟到调用 `evaluateNumeric(configYaml)` 时执行。
 - `Expander(dslYaml, configYaml)`：构造函数即运行完整管线：
@@ -90,12 +95,25 @@ graph TB
   2. 调用 `toStruct()` 剥离 `kind` 字段并过滤 `closed_mate`
   3. 委托 `PosePropagator.propagatePoses()` 执行 FK
 
-### 符号 FK 层：`+ir/TaskFrame` (handle class，A.3.2 新增)
+### 符号 FK 层：`+ir/KinematicModel` (handle class，A.3.2 新增)
 
 - 薄封装：不重复 FK 传播逻辑，直接读取符号 `EdgeGraph` 的 `propagate()` 输出
-- `TaskFrame(edgeGraph, endFrame)`：从 pose map 中抽取 `endFrame` 的 4×4 `sym` 位姿，拆解为 `TSym` / `PosExpr` / `RotExpr`，通过 `symvar()` 自动提取 `JointVars`
+- `KinematicModel(edgeGraph, endFrame)`：从 pose map 中抽取 `endFrame` 的 4×4 `sym` 位姿，拆解为 `TSym` / `PosExpr` / `RotExpr`，通过 `symvar()` 自动提取 `JointVars`
 - `eval(vals)`：代入数值 joint 值，返回 4×4 double
 - `evalPos(vals)` / `evalRot(vals)`：分别返回位置和旋转分量
+- `formulateProblem(execConfig)`：接收 `ExecutionConfig`，根据 known/unknown 分区构造 FK 求值函数（open_loop）或 IK 残差函数（closed_loop）。返回 struct 含 `.Type`、`.eval(vals)`、`.JointVarNames`、`.TargetPose`
+
+### 执行配置层：`+ir/ExecutionConfig` (value class，A.3.3 新增)
+
+- 加载并校验 L3 执行配置 YAML（mode、endFrame、known/unknown 分区、closure_cuts 等）
+- `ExecutionConfig(configYaml, symbolRegistry)`：构造时完成：
+  1. 加载 YAML → 校验 JSON Schema 结构
+  2. 交叉校验所有 ref 在 `symbolRegistry` 中存在
+  3. 校验 known/unknown 完整覆盖所有 joint 变量（不重不漏）
+  4. 校验 mode-conditional 字段（open_loop 禁 closure_cuts，closed_loop 禁 actuated_joints）
+- `partitionVariables()`：返回 `[knownVars, unknownVars]` 两个 struct 数组
+- `getSolvingDirection()`：返回 `'FK'`（endFrame 在 unknown）或 `'IK'`（endFrame 在 known）
+- `getKnownJointVars()` / `getUnknownJointVars()`：过滤出 joint 类型变量
 
 ### 计算层：`+core/PosePropagator` (全部 static)
 
@@ -191,7 +209,7 @@ flowchart TD
 flowchart TD
     A["DSL YAML 文件"] --> B["e = ir.Expander(dslYaml)<br/>← 纯符号展开"]
     B --> C["e.EdgeGraph_ 含 sym 类型的 joint 边"]
-    C --> D["ir.TaskFrame(e.EdgeGraph_, endFrame)"]
+    C --> D["solver.KinematicModel(e.EdgeGraph_, endFrame)"]
     D --> E1["fk.TSym (4×4 sym)"]
     D --> E2["fk.PosExpr (3×1 sym)"]
     D --> E3["fk.RotExpr (3×3 sym)"]
@@ -202,6 +220,27 @@ flowchart TD
     G --> H2["fk.evalPos([q1; q2; ...]) → 3×1 double"]
     G --> H3["fk.evalRot([q1; q2; ...]) → 3×3 double"]
 ```
+
+### 执行配置路径（A.3.3 新增）
+
+```mermaid
+flowchart TD
+    A["DSL YAML 文件"] --> B["e = ir.Expander(dslYaml)<br/>← 纯符号展开"]
+    B --> C1["e.SymbolRegistry<br/>(struct array: name/type/symHandle)"]
+    B --> C2["e.EdgeGraph_"]
+    C2 --> D["solver.KinematicModel(e.EdgeGraph_, endFrame)"]
+    C1 --> E["cfg = ir.ExecutionConfig(execConfigYaml, e.SymbolRegistry)"]
+    E --> F1["cfg.Mode (open_loop / closed_loop)"]
+    E --> F2["cfg.partitionVariables() → [known, unknown]"]
+    E --> F3["cfg.getSolvingDirection() → 'FK' / 'IK'"]
+    D --> G["prob = tf.formulateProblem(cfg)"]
+    F1 & F2 & F3 --> G
+    G --> H1["prob.Type = 'FK' / 'IK'"]
+    G --> H2["prob.eval(vals)<br/>FK → 4×4 pose<br/>IK → 6×1 residual"]
+    G --> H3["prob.JointVarNames / prob.TargetPose"]
+```
+
+> **求解方向切换**：同一套 L2 机构 + 同一套 KinematicModel，仅通过更换 execution-config YAML 即可在 FK（open_loop）和 IK（closed_loop）之间切换。`formulateProblem` 根据 known/unknown 分区自动构造对应的数值函数。
 
 ## 关键设计决策
 
@@ -235,22 +274,22 @@ T_plug←socket = Rz(roll × 2π / symmetry) × Rx(π),  t = 0
 |------|----------|------------------|
 | 状态 | handle class，有状态（EdgeGraph_、DefCache_） | function，无状态 |
 | 职责 | DSL→IR 展开、参数注入、图构建、FK 传播 | 纯渲染：triad、geometry、诊断线 |
-| 消费者 | `+viz/mechanism.m`（数值）、`+ir/TaskFrame`（符号） | 终端用户 |
+| 消费者 | `+viz/mechanism.m`（数值）、`+ir/KinematicModel`（符号） | 终端用户 |
 | 变更原因 | DSL 语法演进、新模块类型、符号变量管线 | 渲染样式、新几何格式 |
 
 A.3.0 之前，DSL 解析和 EdgeGraph 构建逻辑全部内嵌在 `+viz/mechanism.m` 的 setup 区段和 local functions 中。
 抽离为独立 `Expander` 后：
 - 可视化层退化为纯消费者（只读 public 属性）
-- `TaskFrame` 可复用同一套展开逻辑——Expander 始终产生符号位姿，无需模式切换
+- `KinematicModel` 可复用同一套展开逻辑——Expander 始终产生符号位姿，无需模式切换
 - 测试可以独立构造 Expander，不启动图形窗口
 
-### 6. 为什么 `TaskFrame` 是薄封装而非独立引擎
+### 6. 为什么 `KinematicModel` 是薄封装而非独立引擎
 
-`TaskFrame` 不重复 FK 传播逻辑。它依赖两个已有事实：
+`KinematicModel` 不重复 FK 传播逻辑。它依赖两个已有事实：
 1. `EdgeGraph` 的 `propagate()` 对 `sym` T 矩阵透明（MATLAB 多态运算符）
 2. `Expander` 已将 joint 边构建为符号变换（A.4.0 纯符号化）
 
-因此 `TaskFrame` 的唯一增量工作是：从 `propagate()` 生成的 pose map 中抽取 `endFrame` 的符号位姿并拆解。
+因此 `KinematicModel` 的唯一增量工作是：从 `propagate()` 生成的 pose map 中抽取 `endFrame` 的符号位姿并拆解。
 这种设计避免了符号管道和数值管道的代码分叉——同一套 `EdgeGraph` + `PosePropagator` 服务于两种模式。
 
 ### 7. 为什么 `PosePropagator` 保持独立

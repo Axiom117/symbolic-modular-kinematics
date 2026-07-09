@@ -17,7 +17,7 @@ classdef Expander < handle
 %       % e.MechName, e.Instances, e.ConnectionInfo, e.Poses, e.LibDir,
 %       % e.JointVarMap, e.EdgeGraph_
 %
-%   See also: +ir/EdgeGraph, +viz/mechanism, +core/PosePropagator, +ir/TaskFrame
+%   See also: +ir/EdgeGraph, +viz/mechanism, +core/PosePropagator, +solver/KinematicModel
 
     % ---- public read-only properties ----
     properties (SetAccess = private)
@@ -28,12 +28,14 @@ classdef Expander < handle
         LibDir         (1,:) char            % absolute path to the module library directory
         JointVarMap                       % containers.Map: canonical var name (e.g. 'joint1.q') → symbolic handle
         JointValues                       % containers.Map: canonical var name → numeric value (populated by evaluateNumeric)
-        EdgeGraph_                          % ir.EdgeGraph handle (public read for TaskFrame)
+        SymbolRegistry (:,1) struct          % struct array: name, type (geometric/joint/task), symHandle, scope, module_type, instance
+        EdgeGraph_                          % ir.EdgeGraph handle (public read for solver.KinematicModel)
     end
 
     % ---- private properties ----
     properties (Access = private)
         DefCache_                           % containers.Map: module_type → parsed module def, cached to avoid reloading YAML for repeated types
+        SymbolRegistry_ (:,1) struct = struct('name', {}, 'type', {}, 'symHandle', {}, 'scope', {}, 'module_type', {}, 'instance', {})  % accumulator built during expansion
     end
 
     % ---- public methods ----
@@ -148,6 +150,19 @@ classdef Expander < handle
                 obj.EdgeGraph_.addRoot(obj.Instances(1).bodies{1}.node);
             end
             obj.Poses = obj.EdgeGraph_.propagate();
+
+            % ---- fill task frame symHandles from propagated Poses ----
+            for i = 1:numel(obj.SymbolRegistry_)
+                if strcmp(obj.SymbolRegistry_(i).type, 'task')
+                    frameName = obj.SymbolRegistry_(i).name;
+                    if isKey(obj.Poses, frameName)
+                        obj.SymbolRegistry_(i).symHandle = obj.Poses(frameName);
+                    end
+                end
+            end
+
+            % ---- publish SymbolRegistry ----
+            obj.SymbolRegistry = obj.SymbolRegistry_;
         end
 
         %% evaluateNumeric  Substitute joint values from config and return numeric Poses.
@@ -257,6 +272,17 @@ classdef Expander < handle
                 b = bodies{k};
                 bList{k} = struct('node', [pre b.name], 'name', b.name, ...
                     'geometry', core.CommonUtils.field(b, 'geometry', ''));
+
+                % ---- collect observable body centers into SymbolRegistry ----
+                if core.CommonUtils.field(b, 'observable', false)
+                    obj.SymbolRegistry_(end+1) = struct( ...
+                        'name', [pre b.name], ...
+                        'type', 'task', ...
+                        'symHandle', sym([]), ...  % placeholder; filled after FK propagation
+                        'scope', 'instance', ...
+                        'module_type', itype, ...
+                        'instance', iname);
+                end
             end
 
             % ---- expand frames ----
@@ -276,6 +302,18 @@ classdef Expander < handle
                 % a frame as the propagation seed (pose = eye(4)).
                 if strcmp(core.CommonUtils.field(f, 'semantic_tag', ''), 'root')
                     obj.EdgeGraph_.addRoot(node);
+                end
+
+                % ---- collect task frames into SymbolRegistry ----
+                if isfield(f, 'observable') && isequal(f.observable, true) && ...
+                   ~isempty(core.CommonUtils.field(f, 'semantic_tag', ''))
+                    obj.SymbolRegistry_(end+1) = struct( ...
+                        'name', node, ...
+                        'type', 'task', ...
+                        'symHandle', sym([]), ...  % placeholder; filled after FK propagation
+                        'scope', 'instance', ...
+                        'module_type', itype, ...
+                        'instance', iname);
                 end
             end
 
@@ -311,6 +349,17 @@ classdef Expander < handle
                 jList{k} = struct('node', [pre j.from_frame], ...
                     'axis', ax(:) / max(norm(ax), eps), ...
                     'var', j.variable, 'val', val, 'kind', kind);
+
+                % ---- collect joint variables into SymbolRegistry ----
+                if core.CommonUtils.field(j, 'observable', true)
+                    obj.SymbolRegistry_(end+1) = struct( ...
+                        'name', symName, ...
+                        'type', 'joint', ...
+                        'symHandle', val, ...
+                        'scope', 'instance', ...
+                        'module_type', itype, ...
+                        'instance', iname);
+                end
             end
 
             % ---- assemble instance struct ----

@@ -101,7 +101,7 @@ graph TD
 
 | 文件 | 说明 |
 |------|------|
-| `scripts/matlab/ARCHITECTURE.md` | **MATLAB 代码架构文档**：+viz → +ir（Expander + EdgeGraph + TaskFrame）→ +core（PosePropagator）四层架构、数据流图、设计决策。约 400 行。 |
+| `scripts/matlab/ARCHITECTURE.md` | **MATLAB 代码架构文档**：+viz → +ir（Expander + EdgeGraph + KinematicModel）→ +core（PosePropagator）四层架构、数据流图、设计决策。约 400 行。 |
 | `scripts/matlab/README.md` | MATLAB 脚本用法说明（单模块可视化、机构装配可视化命令）。 |
 
 ### L8 · 背景参考

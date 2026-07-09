@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=../../../schema/execution-config.schema.yaml
+# single-closed-loop 执行配置 — 闭环 IK 模式（A.4 模板）
+#
+# 求解方向：IK（已知末端位姿 → 求解关节角度）
+# 注意：此为结构模板，闭环约束构造需 A.4 完成后才可实际求解。
+# 详细文档见同目录 README.md
+#
+# closure_cuts 未显式声明：ExecutionConfig 从 DSL 的 closed: true 连接
+# 自动推导切口位置（EdgeGraph 的 closed_mate 边）。
+# world_binding 未显式声明：L2 内部闭环的接地由 IR root node 处理，
+# 无需额外的 world 绑定配置。
+
+mode: closed_loop
+endFrame: frame_link_D2.frame_hyper_cube
+
+# 变量分区
+known:
+  - frame_link_D2.frame_hyper_cube
+
+unknown:
+  - joint_AB.q
+  - joint_BD.q
+  - joint_CD.q
+  - joint_AC.q
+
+tolerances:
+  translation_mm: 0.001
+  rotation_rad: 0.001

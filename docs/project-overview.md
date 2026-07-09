@@ -369,7 +369,7 @@ flowchart LR
 
 具体任务：
 
-- 新建 `+ir/TaskFrame.m`：接收 `EdgeGraph`（展开后的 IR 图），逐边累积符号 4×4 变换矩阵
+- 新建 `+solver/KinematicModel.m`：接收 `EdgeGraph`（展开后的 IR 图），逐边累积符号 4×4 变换矩阵
 - 复用现有的 FK 传播拓扑（`PosePropagator.propagatePoses` 的遍历逻辑），但每步累积使用 MATLAB Symbolic Math Toolbox 的 `sym` 类型
 - 关节变量（`q`, `dx`, `dy`, `dz`）注册为 `syms` 符号变量
 - 几何参数（`cubeLength`, `tipDistance`）保留为 `sym` 常数（数值化后用 `sym(...)` 包装，保持类型一致）
@@ -380,7 +380,7 @@ flowchart LR
 
 | 文件 | 内容 |
 |------|------|
-| `+ir/TaskFrame.m` | 符号 FK 引擎：EdgeGraph → 末端 frame 符号位姿表达式 |
+| `+solver/KinematicModel.m` | 符号 FK 引擎：EdgeGraph → 末端 frame 符号位姿表达式 |
 | `tests/pipeline/test_symbolic_fk_open_chain_2r.m` | 对 open-chain-2r 验证符号 FK 表达式与手工推导一致 |
 
 过关标准：
@@ -403,7 +403,7 @@ flowchart LR
   - `task`：任务 frame（如 `tip_origin`，FK 输出候选 / IK 目标候选）
 - 创建 `specs/schema/execution-config.schema.yaml`，定义 L3 配置结构：
   - `mode`: `open_loop` | `closed_loop`
-  - `world_binding`：声明每个 `ground` frame 到 `world` 的静态标定变换。该变换由解释器在零位构型下从 root frame（末端效应器，$T=I_4$）沿机构传播自动计算，而非手工指定。它确保末端效应器在零位时与世界原点重合，同时各 Manipulator 关节处于其零位（dx=dy=dz=0）
+  - `world_binding`：声明每个 `ground` frame 到 `world` 的静态标定变换。该变换由解释器在零位构型下从 root frame（末端效应器，$T=I_4$）沿机构传播自动计算，可以通过一次FK位姿计算来得到这个偏移量。它确保末端效应器在零位时与世界原点重合，同时各 Manipulator 关节处于其零位（dx=dy=dz=0）
   - `endFrame`：FK 输出的目标坐标系引用
   - `actuated_joints`：驱动关节列表（开环模式）
   - `known` / `unknown`：变量分区（决定 FK 还是 IK 方向）
@@ -419,135 +419,318 @@ flowchart LR
 过关标准：
 
 - `open-chain-2r` 的 `symbolRegistry` 包含 `joint1.q`、`joint2.q`、`pipette.tip_origin`
-- 执行配置 `mode=open_loop, endFrame=pipette.tip_origin` 能正确指导 FK 方向（endFrame 即为末端输出目标）
+- 执行配置 `mode=open_loop, endFrame=frame2.frame_hyper_cube` 能正确指导 FK 方向（endFrame 即为末端输出目标）
 
 ---
-
-#### A.3.4 · IR 结构校验与端到端验证
-
-目标：实现 IR 结构校验，并跑通完整的「DSL → IR → 符号 FK → 数值验证」管线。
-
-具体任务：
-
-- 新建 `+ir/Validator.m`，实现以下校验（基于展开后的 IR 图）：
-  - **引用完整性**：所有 `frame.host` 引用的 `body` 存在；所有 `fixedTransform`/`joint` 的 `from_frame`/`to_frame` 引用的 frame 或 body 存在
-  - **连通性**：从 root nodes 出发可到达所有 `body` 节点（无孤立子图）
-  - **Root node 存在性**：至少有一个 root node
-  - **类型一致性**：`joint` 的 `from_frame`/`to_frame` 不能是 `exposed` frame（当前约定：joint 两端为模块内部 hinge frame，不直接接 port）
-  - **symbolRegistry 无冲突**：同一变量名不被重复注册为不同类型
-- 对三个 DSL 示例执行全管线验证：
-  1. DSL 语法校验（A.2 `mechanism-assembly.schema.yaml`）
-  2. IR 展开（`ir.Expander`）
-  3. IR 结构校验（`ir.Validator`）
-  4. 符号 FK 生成（`ir.TaskFrame`）
-  5. 数值代入验证（与 `viz.mechanism` 数值结果对比）
-- 编写测试脚本自动化上述流程
-
-产出：
-
-| 文件 | 内容 |
-|------|------|
-| `+ir/Validator.m` | IR 结构校验器 |
-| `tests/pipeline/test_pipeline_open_chain_2r.m` | open-chain-2r 端到端管线测试 |
-| `tests/pipeline/test_pipeline_all_examples.m` | 三个 DSL 示例的批量管线测试 |
-
-过关标准（A.3 整体）：
-
-- 解释器输出的末端位姿符号表达式与手工推导结果一致
-- 对同一条开环链，替换不同模块参数后仍能稳定生成新表达式，无需改解释器逻辑
-- IR 展开后无孤立节点、无悬空引用
-- `ir-graph.schema.yaml` 校验通过
-- 两个 DSL 示例（open-chain-2r、single-closed-loop）的 IR 展开均通过结构校验
-- 符号 FK 表达式数值求值结果与 `viz.mechanism` 数值 FK 输出一致（误差 < 1e-12）
 
 > **闭环说明**：single-closed-loop 含 `closed: true` 边，其符号 FK 仅沿生成树传播（弦边不参与），因此末端位姿表达式是「开环近似」，不代表闭环约束下的真实位姿。闭环约束构造由 A.4 承接。A.3 只需保证闭环机构的 IR 图展开正确、生成树 FK 可计算。
 
+> **A.3.4 已删去**：原 A.3.4 要求的 `+ir/Validator.m`（IR 结构校验器）和管线对比测试在实际开发中已被证明不需要作为独立阶段：
+> - 管线端到端测试已被 `test_symbolic_fk_*.m` 和 `test_execution_config_*.m` 覆盖
+> - 符号 FK vs 数值 FK 对比是循环论证（两者使用同一套 `PosePropagator` 引擎）
+> - 手工推导运动学公式验证的前提条件不满足（尚无手工推导的 case）
+> - IR 结构完整性由 `Expander` 构造过程保证（construction guarantees correctness）
+>
+> `ir.Validator` 作为防御性回归工具延后至 A.6 测试顺序中实现。
+
 ---
 
-### 阶段 A.4 · 解释器 v1：扩展到闭环约束
+### 阶段 A.4 · 闭环约束构造与数值求解
 
-目标：在开环遍历稳定后，把解释器扩展到闭环机构，让它能自动识别独立闭环并构造约束方程。
+目标：在开环 FK 稳定的基础上，扩展到闭环约束的自动生成，并接入 fmincon 完成数值求解验证。A.4 复用 A.3 的全部 IR 展开基础设施，仅增加闭环回路处理与求解器接入。
 
-这里的关键不是「直接求解」，而是「正确生成约束」。A.4 复用 A.3 的全部 IR 展开与校验基础设施，
-仅增加闭环回路处理。
+> **包结构重整**：A.4 起新建 `+solver/` 包，与 `+ir/` 职责分离：
+> - `+ir/` — IR 核心（`EdgeGraph`、`Expander`、`ExecutionConfig`）：图结构、DSL→IR 编译、配置加载
+> - `+solver/` — 求解管线（`KinematicModel`、`ClosureSolver`、`Solver`、`DofAnalyzer`）：符号 FK、闭环约束、数值求解、DOF 分析
+>
+> A.4 开始时将 `KinematicModel.m` 从 `+ir/` 迁入 `+solver/`，并更新所有 test 文件的 import 路径。
 
 **A.4 处理两类闭环**（详见 `specs/dsl/connection-semantics.md` §6.4）：
 
-| 闭环类型 | 切口来源 | 主要用途 |
+| 闭环类型 | 切口来源 | 验证案例 | 主要用途 |
+|------|------|------|------|
+| **L2 内部闭环** | DSL `closed: true` 标记的端口连接 | `single-closed-loop`（平行四边形 4 杆） | 验证回路识别/约束构造逻辑，为 L3 打基础 |
+| **L3 世界系闭环** | L3 execution-config `closure_cuts` | `m-rex-3t1r`（两端 Manipulator 笛卡尔驱动） | **M-REx 主构型，当前主导部署模式** |
+
+两类闭环的残差公式完全一致 $T_{\text{residual}} = T_{\text{far}}^{-1} \cdot T_{\text{near}}$——区别仅在于切口位置由 DSL 还是 L3 指定，以及未知量是机构内部关节还是外部驱动关节。
+
+**现有基础设施（A.4 可直接复用）**：
+
+| 能力 | 位置 | 说明 |
 |------|------|------|
-| **L2 内部闭环** | DSL `closed: true` 标记的端口连接 | 验证回路识别/约束构造逻辑（四杆环等） |
-| **L3 世界系闭环** | L3 execution-config `closure_cuts` | **M-REx 主构型，当前主导部署模式** |
+| 闭环边标记 | `Expander.m` | `closed: true` → `addClosedMate()`，`toStruct()` 自动排除于 FK 传播 |
+| 切口自动推导 | `ExecutionConfig.m` | 从 `closed_mate` 边自动推导 `closure_cuts`（L2），也支持显式声明（L3） |
+| 执行配置全套字段 | `ExecutionConfig.m` | `mode: closed_loop`、`closure_cuts`、`world_binding`、`constrained_components`、`tolerances` 全部支持 |
+| 6-DOF 残差分解 | `+solver/KinematicModel.m` → `localPoseError()` | $[t_x, t_y, t_z, r_x, r_y, r_z]$，Z-Y-X 欧拉角 |
+| 符号 FK 传播 | `EdgeGraph.propagate()` | 所有 frame（含闭环两侧 near/far）的符号位姿已在 Poses map 中 |
+| IK 残差 eval 框架 | `+solver/KinematicModel.m` → `localEvalIKResidual()` | 基础 IK 残差框架已存在（当前仅单条生成树路径，A.4 扩展为双路径） |
 
-两类闭环的残差公式完全一致 $T_{\text{residual}} = T_{\text{far}}^{-1} \cdot T_{\text{near}}$——
-区别仅在于切口位置由 DSL 还是 L3 指定，以及未知量是机构内部关节还是外部驱动关节。
+---
 
-#### A.4.1 回路识别与切开
+#### A.4a · L2 内部闭环约束构造（先跑通，低风险）
 
-- **L2 内部闭环**：在 IR 图中识别回路——从 `world` 出发做 DFS 生成树，DSL 中 `closed: true` 的连接即为补边（chord）。在补边连接的 `frame` 对处切割，将闭环暂时转成一棵可遍历的树。
-- **L3 世界系闭环**：DSL 中无 `closed: true`，机构本体为开环树。L3 execution-config 的 `closure_cuts` 显式声明切口位置。两条独立树（`world → Manipulator1 → 机构` 和 `world → Manipulator2 → 机构`）共享同一 `world` 参考系——回路因所有 `ground` frame 均通过各自的静态标定偏移绑定到 `world` 而形成。闭合判据为两条支路到达机构本体同一点（如机构链两端）的位姿应一致。
-- 切开处生成 `constraint` 节点：记录切口两侧坐标系对 `(F_near, F_far)`（见 §3.5）
+**目标**：在 `single-closed-loop` 平行四边形机构上跑通完整的「DSL → IR → 闭环残差 → fmincon IK 求解 → 手工公式验证」管线。这是 A.4 的最小可行验证。
 
-#### A.4.2 闭环约束构造
+**为什么先做 L2**：L2 闭环的 near/far 两侧 frame 都在同一棵生成树上，FK 已计算出两者的符号位姿。残差构造简化为 $T_{\text{residual}} = T_{\text{far}}^{-1} \cdot T_{\text{near}}$，不需要多树传播。
 
-- 对每个切口，沿两条支路分别从切口传播到 `world`（或共同祖先），计算两侧坐标系的相对位姿：
-  $$T_{\text{residual}} = T_{\text{far}}^{-1} \cdot T_{\text{near}}$$
-- 将位姿误差拆为 6 个分量的残差候选项：`[tx, ty, tz, rx, ry, rz]`（平移 mm，姿态 Z-Y-X 欧拉角 rad，§8）
-- **不一律强闭合 6 分量**：由机构 DOF 分析与 L3 执行配置中的 `constrained_components` 字段指定实际约束哪些分量。欠约束/过约束由 A.4 DOF 校验报告，不静默跳过
-- 明确未知量集合（external-driver 关节变量，如 `Manipulator` 的 `dx/dy/dz`）、已知任务量（末端目标位姿）和固定几何参数
+**具体任务**：
 
-#### A.4.3 执行配置（L3，闭环）
+0. **迁移 `KinematicModel.m` 至 `+solver/`**
+   - 将 `+ir/KinematicModel.m` 移入新建的 `+solver/` 目录
+   - 更新所有 test 文件（`test_symbolic_fk_*.m`、`test_execution_config_*.m`）中的 `ir.KinematicModel` → `solver.KinematicModel`
+   - 更新 `Expander.m`、`ExecutionConfig.m` 中对 `ir.KinematicModel` 的引用（如有）
+   - 运行全部现有测试确保无回归
 
-复用 `specs/schema/execution-config.schema.yaml`，闭环构型额外声明：
+1. **新建 `+solver/ClosureSolver.m`**（handle class）
+   - 构造器接收：`EdgeGraph`（已展开、含符号 Poses）、`ExecutionConfig`（含 ClosureCuts）
+   - 核心方法 `buildResidualForCut(cutIndex)`：
+     - 从 EdgeGraph 的 Poses map 中取 $T_{\text{near}} = \text{poses(cut.near)}$、$T_{\text{far}} = \text{poses(cut.far)}$
+     - 计算 $T_{\text{residual}} = T_{\text{far}}^{-1} \cdot T_{\text{near}}$（符号 4×4）
+     - 调用已有 `localPoseError()` 分解为 6 分量残差向量（符号）
+     - 按 `cut.components` 掩码筛选分量
+   - 方法 `buildFullResidual()`：拼接所有切口的残差为一个符号列向量
+   - 方法 `getUnknownSymbols()`：从 ExecutionConfig 获取未知变量的 sym handles
+   - 方法 `toNumericFunction()`：`matlabFunction` 将符号残差转为数值函数句柄，供 fmincon 调用
 
-- `mode: closed_loop`
-- `world_binding`：同开环。闭环构型下每个 `ground` frame 的静态标定偏移同样由零位构型 FK 预计算（末端效应器 $T=I_4$ 与世界原点重合），确保 Manipulator 关节零位与机构零位重合
-- `external_drivers`：哪些 `Manipulator` 实例的关节变量是闭环未知量
-- `closure_cuts`：切口位置声明 `{near: <instance>.<frame>, far: <instance>.<frame>}`
-- `constrained_components`：每切口须归零的位姿分量子集（`[tx, ty, tz, rx, ry, rz]` 的子集）
-- `tolerances`：收敛阈值（平移 mm，姿态 rad）
+2. **零位验证**
+   - 代入全零关节值（零位构型），断言残差向量的数值求值结果 < 1e-12
 
-#### A.4.4 过关标准
+3. **等价性验证**
+   - 手动切换 `closed: true` 标记到另一条等效连接（如把 `joint_AC ↔ frame_link_A3` 的 `closed` 移到 `joint_BD ↔ frame_link_D1`）
+   - 验证：约束数量、未知量数量不变，残差系统在物理上等价（零位残差仍为零）
 
-- 对一个简单闭环机构，解释器能正确给出未知量数量、约束数量和残差表达式。
-- 更换闭环切开位置后，得到的约束系统在物理上等价。
-- 约束数量 + 外部驱动 DOF 数量 ≤ 切口分量总数（不过约束）。
-- 残差表达式经手工代入零位构型验证恒为零。
+4. **手工推导公式验证**（A.4a 的核心亮点，也可放在 A.5 中完成）
+   - 平行四边形 4 杆机构的运动学足够简单，可以手工推导：给定一个被动关节角 $\theta$（如 `joint_AB.q`），其余 3 个关节角由几何约束完全确定，末端 frame（`frame_link_D2.frame_hyper_cube`）的位姿可直接用初等三角函数表达
+   - **验证流程**：
+     1. 编写独立 MATLAB 脚本 `compute_ground_truth_single_closed_loop.m`，用纯几何公式计算给定 $\theta$ 后末端 frame 的位姿 $T_{\text{ground truth}}$
+     2. 以 $T_{\text{ground truth}}$ 作为 IK 目标位姿，调用 ClosureSolver + fmincon 求解全部 4 个关节角
+     3. 将求解出的 $\theta_{\text{solved}}$ 与输入的 $\theta$ 对比，偏差应 < 1e-6
+   - **意义**：这是符号求解管线与完全独立的外部参照（纯几何推导）之间的交叉验证，不依赖任何 IR/DSL 内部逻辑，是闭环求解器正确性最有说服力的证明
 
-### 阶段 A.5 · 接入 MRF 2.4 求解模板
+5. **IK 求解验证**（fmincon SQP）
+   - 给定目标末端位姿，用 `matlabFunction` 将符号残差转为数值函数
+   - 调用 fmincon（SQP），以零位为初值，求解关节角度
+   - 验证解代入后残差 < `tolerances.translation_mm` 且 < `tolerances.rotation_rad`
 
-目标：把解释器生成的符号模型无缝接到现有 MATLAB 求解工作流中，验证“生成器替换，求解管线不变”这个核心假设。
+**产出**：
 
-具体任务：
+| 文件 | 内容 |
+|------|------|
+| `+solver/` | 新建求解包目录；`KinematicModel.m` 从 `+ir/` 迁入 |
+| `+solver/ClosureSolver.m` | 闭环约束符号生成器 + 数值求解桥接 |
+| `tests/pipeline/test_closure_solver_single_closed_loop.m` | 零位验证 + 等价性验证 + IK 求解验证 |
+| `tests/pipeline/compute_ground_truth_single_closed_loop.m` | 平行四边形几何手工推导：$\theta$ → 末端位姿（独立验证基准） |
 
-- 将解释器输出规整成与现有模板兼容的数据结构：几何参数、任务位姿、未知变量列表、残差表达式。
-- 复用 `subs`、`matlabFunction`、数值残差函数包装和 `fmincon` SQP 求解流程。
-- 为 FK 和 IK 分别定义调用接口，避免解释器只服务于单一求解方向。
-- 为不同机构类型设计求解配置层，例如初值、变量边界、有效解判据、残差阈值。
-- 记录数值失败类型，区分“解释器生成错误”和“求解器收敛失败”。
+**过关标准**：
+- 零位构型下残差表达式求值为零（误差 < 1e-12）
+- 切换 `closed: true` 标记位置后约束系统物理等价
+- fmincon 能从目标位姿反解出合理关节角，残差 < tolerance
+- （若完成手工推导验证）$\theta_{\text{solved}}$ 与 $\theta_{\text{true}}$ 偏差 < 1e-6
 
-产出：
+---
 
-- 一套 `topology description -> symbolic model -> numeric solver` 的端到端原型。
-- 至少一个开环 FK 样例和一个闭环 IK 样例。
+#### A.4b · L3 世界系闭环约束构造（M-REx 主构型）
 
-过关标准：
+**目标**：在 `m-rex-3t1r` 上跑通 M-REx 主构型的闭环约束生成与 IK 求解。这是 PathPlanner 集成（A.7.1）的前置步骤。
 
-- 不改动求解器主流程，仅更换输入模型，即可运行新机构。
-- 解释器输出能被 `subs` 和 `matlabFunction` 稳定数值化，不出现大量手工补丁。
+**核心难点**：L3 世界系闭环的 FK 方向与当前 tool-rooted growth 相反。当前 FK 从工具端向外传播到 Manipulator ground frame。但 L3 约束需要以 world 为参考系、以 Manipulator 关节为未知量。
+
+**方案选择（B2：保持 tool-rooted，以 ground frame 位姿匹配为约束）**：
+- 当前 FK：tool tip（$T=I_4$，世界原点）→ 向外传播 → 各 Manipulator ground frame 得到符号位姿 $T_{\text{ground}_i}^{\text{FK}}(q_{\text{internal}}, d_{\text{manipulator}})$
+- 标定已知：$T_{\text{ground}_i}^{\text{world}}$（由零位构型下 FK 预计算，末端效应器 $T=I_4$ 与世界原点重合）
+- 约束：$T_{\text{ground}_i}^{\text{FK}} = T_{\text{ground}_i}^{\text{world}}$
+- 此方案与现有 tool-rooted growth 范式一致，改动最小；若遇到根本性困难再考虑方案 B1（重构 FK root 方向为 world-rooted）
+
+**具体任务**：
+
+1. **编写 `m-rex-3t1r/execution-config.yaml`**（新建）
+   - `mode: closed_loop`
+   - `closure_cuts`：显式声明每条 Manipulator 的 ground frame 作为一个切口对——`near` = ground frame 在 FK 中的位姿（`<manipulator>.ground`），`far` = 对应的 world binding 标定位姿。或声明机构本体上某一点的位姿一致性约束
+   - `world_binding`：每条 Manipulator ground → world 的标定变换（由零位构型 FK 预计算）
+   - `known`：末端目标位姿（`pipette.tip_origin`）+ 内部被动关节变量（`joint_1.q`、`joint_2.q`，在 IK 时视为已知）
+   - `unknown`：Manipulator 关节变量（`manipulator_L.dx/dy/dz`、`manipulator_R.dx/dy/dz`，共 6 个标量）
+   - `constrained_components`：由于 2 个 Manipulator × 6 DOF = 12 分量 > 机构实际 4 外部 DOF（3T1R），需合理选择约束子集——建议先仅约束 `[tx, ty, tz]`（位置），逐步增加转动约束
+   - `tolerances`
+
+2. **扩展 `ClosureSolver` 支持 L3 模式**
+   - 检测 `ExecutionConfig.ClosureSource == 'explicit'`（L3 切口，区别于 L2 的 `'auto'`）
+   - 对于 L3 切口：残差 = ground frame FK pose vs world binding pose 的误差，用 `localPoseError()` 分解
+   - 多 ground frame 的残差拼接为完整残差向量
+   - 支持 `constrained_components` 掩码选择分量
+
+3. **零位验证**
+   - 零位构型下各 Manipulator 关节 dx=dy=dz=0，ground frame FK 位姿应等于 world binding 标定位姿
+   - 断言残差 < 1e-12
+
+4. **IK 求解验证**
+   - 给定末端目标位姿（如沿 X 轴平移 10mm），用 fmincon 求解 6 个 Manipulator 关节位移
+   - 验证解代入后残差 < tolerance
+   - 将解代入数值 FK，验证末端位姿与目标位姿一致（从 world 经 Manipulator 到 tool tip 的 FK 链应与目标匹配）
+
+5. **DOF 分析**
+   - 分析约束数与未知量数的匹配关系
+   - 报告欠约束/过约束情况，指导 `constrained_components` 子集选择
+   - 注意：当前 Manipulator 内部链在零位为恒等变换（满足 §2.4 初始零位条件），简化了零位验证
+
+**产出**：
+
+| 文件 | 内容 |
+|------|------|
+| `specs/dsl/cases/m-rex-3t1r/execution-config.yaml` | L3 闭环执行配置（新建） |
+| `+solver/ClosureSolver.m` | 扩展支持 L3 模式（与 A.4a 同一文件） |
+| `tests/pipeline/test_closure_solver_m_rex_3t1r.m` | 零位验证 + IK 求解验证 |
+
+**过关标准**：
+- 零位构型下残差为零（误差 < 1e-12）
+- 给定合理目标位姿，fmincon 能收敛到有效解，残差 < tolerance
+- 约束数与未知量数匹配（合理选择 `constrained_components` 子集，避免过约束）
+- 存在至少一组非零目标位姿使得 IK 求解成功
+
+---
+
+### 阶段 A.5 · 求解管线完善：可视化、标准化与诊断
+
+目标：在 A.4 已验证闭环求解可行性的基础上，将求解管线从「能跑通」提升到「可观测、可诊断、可复用」的水平。A.5 不再重复 fmincon 接入（已在 A.4 的 `ClosureSolver` 中完成），而是聚焦求解器外围支撑能力：机构动画、接口标准化、DOF 分析。
+
+---
+
+#### A.5.1 · 机构动画可视化
+
+**目标**：在 A.2.5 静态装配可视化的基础上，增加动态动画能力——给定关节轨迹（时间序列的关节值），逐帧更新机构位形并渲染。这是「求解结果可观测」的核心手段，也直接服务于后续 PathPlanner 集成时的实时状态显示需求。
+
+**现有基础**：`viz.mechanism` 已能渲染单帧静态装配体；`EdgeGraph.propagate()` 已能对任意关节值计算全局位姿。
+
+**具体任务**：
+
+1. **逐帧 FK 更新**
+   - 输入：关节轨迹矩阵 $Q \in \mathbb{R}^{n_{\text{frames}} \times n_{\text{joints}}}$（每行一帧的关节值）
+   - 每帧用 `EdgeGraph.propagate()` 重新计算全局位姿（复用数值 FK 路径，闭环节点同样可计算）
+   - 更新所有 body 几何体、frame 三轴、mate 诊断线的位姿
+
+2. **动画控制**
+   - 播放/暂停/步进/调速
+   - 时间轴滑块
+   - 循环播放
+
+3. **末端轨迹绘制**
+   - 在动画中实时绘制末端效应器（如 `pipette.tip_origin`）的 3D 轨迹线
+   - 可选：同时显示目标位姿标记（IK 求解时的 target）与实际位姿的偏差向量
+
+4. **多子图对比**
+   - 并排显示多组关节轨迹对应的动画（如不同初值的 IK 收敛过程对比）
+
+5. **导出**
+   - 动画帧序列导出为 GIF/MP4
+   - 轨迹数据导出为 CSV
+
+**产出**：
+
+| 文件 | 内容 |
+|------|------|
+| `scripts/matlab/+viz/animate.m` | 机构动画主函数：关节轨迹 → 逐帧 FK → 渲染循环 |
+| `tests/pipeline/test_animation_single_closed_loop.m` | 对 single-closed-loop 的 IK 求解结果做动画验证 |
+
+**过关标准**：
+- 对 single-closed-loop 的 fmincon IK 求解结果，动画中末端 frame 从初值位姿连续运动到目标位姿，最终残差向量 → 0
+- 动画帧率 ≥ 10 fps（MATLAB figure 模式下）
+
+---
+
+#### A.5.2 · 求解器标准化与鲁棒性
+
+**目标**：将 A.4 中散落在 `ClosureSolver` 和测试脚本中的求解逻辑统一为标准化接口，增加边界管理、初值策略和收敛诊断能力。
+
+**具体任务**：
+
+1. **统一 FK/IK API**
+   - 设计 `Solver.solve(mechanismName, targetPose)` 风格的高层接口
+   - 内部自动路由：开环机构 → FK 直接求值，闭环机构 → fmincon SQP IK
+   - 对 L2/L3 闭环使用同一套求解逻辑（`ClosureSolver` + `ExecutionConfig`）
+
+2. **变量边界管理**
+   - 从模块定义 YAML 中读取关节限位（`joint.limits`）和 Manipulator 行程
+   - 自动翻译为 fmincon 的 `lb`/`ub` 参数
+   - 支持通过 execution-config 覆盖默认边界
+
+3. **初值策略**
+   - 默认：零位初值（适用于小位移 IK）
+   - 随机多起点：在边界内均匀采样 N 组初值，取残差最小的解
+   - 热启动：以上一帧的解作为当前帧初值（适用于轨迹跟踪）
+
+4. **收敛诊断与失败分类**
+   - 将 fmincon `exitflag` 映射为可读消息
+   - 输出残差分量明细（每个切口、每个分量的最终残差）
+   - 失败自动分类：
+     - 「模型不可解」— 目标位姿超出工作空间（残差大 + 所有初值均失败）
+     - 「初值不佳」— 某些初值成功、某些失败
+     - 「数值病态」— Jacobian 条件数过大、步长萎缩
+
+**产出**：
+
+| 文件 | 内容 |
+|------|------|
+| `+solver/Solver.m` | 统一求解接口：FK/IK 路由 + 边界/初值/诊断 |
+| `tests/pipeline/test_solver_robustness.m` | 多初值 + 边界约束 + 失败分类测试 |
+
+**过关标准**：
+- 同一 API 调用可处理 open-chain-2r（FK）、single-closed-loop（IK）、m-rex-3t1r（IK）
+- 随机多起点求解成功率 ≥ 80%（对于工作空间内的目标位姿）
+- 失败时输出可操作的诊断信息（而非裸 exitflag）
+
+---
+
+#### A.5.3 · DOF 分析与约束校验
+
+**目标**：在 IR 图层面自动计算机构自由度，检测欠约束/过约束/奇异位形，为求解器提供约束子集选择指导和健康检查。
+
+**具体任务**：
+
+1. **模块化机构 DOF 公式**
+   - 基于展开后的 IR 图，统计：$N_{\text{bodies}}$、$N_{\text{joints}}$、每个 joint 的 DOF $f_i$、独立闭环数 $L$
+   - 使用 Grübler/Kutzbach 公式：$\text{DOF} = 6(N_{\text{bodies}} - 1) - \sum (6 - f_i) + 6L$（空间机构）
+   - 输出：机构整体 DOF、各闭环贡献、冗余约束数
+
+2. **约束 Jacobian 秩分析**
+   - 在零位构型下，数值构造约束 Jacobian $J = \partial \mathbf{r} / \partial \mathbf{q}$（其中 $\mathbf{r}$ 为残差向量，$\mathbf{q}$ 为未知关节变量）
+   - 计算 $J$ 的秩和条件数
+   - 检测冗余约束：若 $\text{rank}(J) < \min(|\mathbf{r}|, |\mathbf{q}|)$，则存在冗余——自动建议裁减 `constrained_components`
+
+3. **奇异性检测**
+   - 在目标位姿处评估 Jacobian 条件数
+   - 条件数 > 阈值 → 警告奇异位形
+
+4. **`constrained_components` 建议**
+   - 基于 DOF 分析和 Jacobian 秩，自动建议每个切口的约束分量子集
+   - 例：对 m-rex-3t1r（2 个 Manipulator，12 个原始分量，4 个外部 DOF），建议仅约束 `[tx, ty, tz]` 或 `[tx, ty, tz, ry]`
+
+**产出**：
+
+| 文件 | 内容 |
+|------|------|
+| `+solver/DofAnalyzer.m` | DOF 分析器：Grübler 公式 + Jacobian 秩 + 奇异检测 |
+| `tests/pipeline/test_dof_analysis.m` | 对三个 DSL 案例的 DOF 分析比对 |
+
+**过关标准**：
+- `single-closed-loop` 的 DOF = 1（4 杆机构 1 个自由度），与手工计算一致
+- `m-rex-3t1r` 的 DOF = 4（3T1R），冗余约束被正确检测
+- `open-chain-2r` 的 DOF = 2（两转动关节串联），Jacobian 满秩
 
 ### 阶段 A.6 · 测试顺序与验证样例
 
 目标：按风险从低到高排列验证路线，避免一开始就用并联闭环把问题混在一起。
 
-建议顺序：
+**建议顺序**（✅ = 已完成，🔄 = 进行中，⬜ = 待开始）：
 
-1. 单模块实例化：验证端口坐标系定义。
-2. 两模块开环连接：验证连接语义和固定变换传播。
-3. 含一个转动副的开环链：验证关节变量注册和 FK 输出。
-4. **L2 内部闭环机构**（四杆环）：验证回路识别和约束构造——验证 `closed: true` 标记的
-   切口生成与残差公式，为 L3 世界系闭环打基础。
-5. 三支链并联雏形（L2 闭环）：验证多支链 FK 传播与多切口约束构造。
-6. **M-REx 世界系闭环**（L3 闭环，主导目标）：机构本体为开环链，末端效应器在零位与世界原点重合（$T=I_4$），两台 `Manipulator` 的 `ground` frame 通过各自的静态标定偏移绑定到同一 `world` 参考系。验证 L3 `closure_cuts` 切口生成、外部驱动变量指派、以及两树合并约束构造。这是 PathPlanner 集成验证的前置步骤。
+0. ⬜ **IR 结构校验器 `ir.Validator`**（防御性回归工具，从已删去的 A.3.4 延后至此）
+   - 在每次 IR 展开后自动运行引用完整性、连通性、root node 存在性、类型一致性检查
+   - 价值在于未来 DSL/模块复杂度提升后的回归防护，不影响当前求解管线开发
+   - 实现时机灵活——可在 A.4~A.7 任意时间点插入，作为 CI 风格的前置检查步骤
+1. ✅ 单模块实例化：验证端口坐标系定义。
+2. ✅ 两模块开环连接：验证连接语义和固定变换传播。
+3. ✅ 含一个转动副的开环链：验证关节变量注册和 FK 输出。
+4. 🔄 **L2 内部闭环机构**（`single-closed-loop` 平行四边形 4 杆）：对应 A.4a。验证 `closed: true` 标记的切口生成、残差公式、fmincon IK 求解，以及手工推导几何公式的交叉验证。
+5. ⬜ 三支链并联雏形（L2 闭环）：验证多支链 FK 传播与多切口约束构造。（可选——如 A.4a 验证充分可跳过）
+6. 🔄 **M-REx 世界系闭环**（`m-rex-3t1r`，L3 闭环，主导目标）：对应 A.4b。机构本体为开环链，末端效应器在零位与世界原点重合（$T=I_4$），两台 `Manipulator` 的 `ground` frame 通过各自的静态标定偏移绑定到同一 `world` 参考系。验证 L3 `closure_cuts` 切口生成、外部驱动变量指派、以及 IK 求解。这是 PathPlanner 集成验证（A.7.1）的前置步骤。
 
 每个样例都应至少输出：
 

@@ -1,0 +1,199 @@
+# L3 执行配置 schema（阶段 A.3.3）
+# Execution-config schema for the L3 execution layer.
+#
+# 这是 JSON Schema，用于校验 specs/dsl/cases/*/execution-config.yaml
+# 中的执行层（Execution，L3）配置文件。schema 严格遵循
+# ../modeling-conventions.md §2.4 与 ../conventions.yaml；凡冲突以约定文档为准。
+#
+# 执行配置定义：机构如何被固定、如何被驱动、求解方向（FK/IK）、
+# 变量 known/unknown 分区。同一套机构本体（L2）可接入不同执行配置，
+# 从而在开环 FK 与闭环 IK 之间切换。
+#
+# 以下跨文件语义由 +ir/ExecutionConfig.m 校验（Schema 无法表达）：
+#   - endFrame / actuated_joints / known / unknown / closure_cuts 中所有
+#     ref 必须在 symbolRegistry 中存在
+#   - known ∪ unknown 必须完整覆盖所有 joint 变量（不重不漏）
+#   - mode=open_loop 时 closure_cuts 与 world_binding 必须为空
+#   - mode=closed_loop 时 actuated_joints 必须为空
+#   - closure_cuts 中的 near/far ref 必须引用 exposed frame 或 ground frame
+
+title: ExecutionConfig
+description: >-
+  单台机构的 L3 执行层配置。指定求解模式（开环/闭环）、世界系绑定、
+  变量分区（known/unknown）、末端输出坐标系与闭环切口位置。
+type: object
+additionalProperties: false
+
+required:
+  - mode
+  - endFrame
+  - known
+  - unknown
+
+# ---------------------------------------------------------------------------
+# 复用定义
+# ---------------------------------------------------------------------------
+$defs:
+
+  modeEnum:
+    description: 求解模式。
+    type: string
+    enum:
+      - open_loop
+      - closed_loop
+
+  portRef:
+    description: >-
+      实例限定帧引用 "<instance>.<frame>"。
+      instance 为 lowerCamelCase/snake_case，frame 遵循模块定义命名规则。
+    type: string
+    pattern: "^[a-z][a-zA-Z0-9_]*\\.[a-zA-Z][a-zA-Z0-9_]*$"
+
+  jointVarRef:
+    description: >-
+      实例限定关节变量引用 "<instance>.<variable>"。
+      variable 为模块定义的关节变量名（如 q、dx、dy、dz）。
+    type: string
+    pattern: "^[a-z][a-zA-Z0-9_]*\\.[a-zA-Z][a-zA-Z0-9_]*$"
+
+  homogenousMatrix:
+    description: 4×4 齐次变换矩阵（行主序）。
+    type: array
+    minItems: 4
+    maxItems: 4
+    items:
+      type: array
+      minItems: 4
+      maxItems: 4
+      items:
+        type: number
+
+  worldBinding:
+    description: 单个 ground frame 到 world 的静态标定偏移。
+    type: object
+    additionalProperties: false
+    required:
+      - ground
+      - T
+    properties:
+      ground:
+        description: 接地帧引用（如 manipulator_L.ground）。
+        $ref: "#/$defs/portRef"
+      T:
+        description: 4×4 齐次变换矩阵（静态标定偏移）。
+        $ref: "#/$defs/homogenousMatrix"
+
+  closureCut:
+    description: 单条闭环切口声明。
+    type: object
+    additionalProperties: false
+    required:
+      - near
+      - far
+    properties:
+      near:
+        description: 切口近端帧引用。
+        $ref: "#/$defs/portRef"
+      far:
+        description: 切口远端帧引用。
+        $ref: "#/$defs/portRef"
+      components:
+        description: >-
+          须归零的位姿分量子集。未指定时默认全部 6 分量 [tx, ty, tz, rx, ry, rz]。
+          tx/ty/tz 为平移分量（mm），rx/ry/rz 为 Z-Y-X 欧拉角姿态分量（rad）。
+        type: array
+        minItems: 1
+        maxItems: 6
+        uniqueItems: true
+        items:
+          type: string
+          enum:
+            - tx
+            - ty
+            - tz
+            - rx
+            - ry
+            - rz
+
+  tolerances:
+    description: 数值求解收敛阈值。
+    type: object
+    additionalProperties: false
+    properties:
+      translation_mm:
+        description: 平移残差收敛阈值（mm）。
+        type: number
+        minimum: 0
+        default: 0.001
+      rotation_rad:
+        description: 姿态残差收敛阈值（rad）。
+        type: number
+        minimum: 0
+        default: 0.001
+
+# ---------------------------------------------------------------------------
+# 顶层属性
+# ---------------------------------------------------------------------------
+properties:
+
+  mode:
+    $ref: "#/$defs/modeEnum"
+
+  endFrame:
+    description: FK 输出 / IK 目标坐标系引用。
+    $ref: "#/$defs/portRef"
+
+  world_binding:
+    description: >-
+      各 ground frame 到 world 的静态标定变换列表。
+      每个 ground frame 的偏移由机构零位构型 FK 预计算
+      （末端效应器 T=I₄，沿机构传播至 ground frame 的位姿）。
+      仅 closed_loop 模式使用。
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/worldBinding"
+
+  actuated_joints:
+    description: >-
+      驱动关节列表。每个 ref 指向一个 joint 变量。
+      仅 open_loop 模式使用。
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/jointVarRef"
+
+  known:
+    description: >-
+      已知变量列表（输入）。每个 ref 指向一个变量（joint 变量或 task frame）。
+      FK 模式下 joint 变量为 known；IK 模式下目标 frame 为 known。
+    type: array
+    minItems: 1
+    items:
+      anyOf:
+        - $ref: "#/$defs/jointVarRef"
+        - $ref: "#/$defs/portRef"
+
+  unknown:
+    description: >-
+      未知变量列表（输出）。每个 ref 指向一个变量（joint 变量或 task frame）。
+      FK 模式下 task frame 为 unknown；IK 模式下 joint 变量为 unknown。
+    type: array
+    minItems: 1
+    items:
+      anyOf:
+        - $ref: "#/$defs/jointVarRef"
+        - $ref: "#/$defs/portRef"
+
+  closure_cuts:
+    description: >-
+      闭环切口声明列表。每切口定义一个 near/far 帧对与须归零的位姿分量。
+      仅 closed_loop 模式使用。
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/closureCut"
+
+  tolerances:
+    description: 数值求解收敛阈值。
+    $ref: "#/$defs/tolerances"
