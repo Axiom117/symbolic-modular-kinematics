@@ -6,17 +6,11 @@ classdef Expander < handle
 %   with symbolic joint variables, process port-to-port connections (mate
 %   edges), register ground nodes, and propagate global poses via FK.
 %
-%   All joint variables are created as symbolic (sym) objects.  The Poses
-%   map contains 4×4 sym homogeneous transforms.  Numeric evaluation is
-%   deferred to evaluateNumeric(configYaml), which substitutes joint
-%   values from a per-instance config file and returns a numeric pose map
-%   suitable for visualization or numeric IK solvers.
-%
 %   Usage:
 %       % symbolic expansion only (Poses are sym):
 %       e = ir.Expander('../../specs/dsl/examples/open-chain-2r/robot_description.yaml');
 %
-%       % numeric evaluation for viz or solver:
+%       % numeric evaluation for viz or solver (configYaml is required):
 %       posesNum = e.evaluateNumeric('../../specs/dsl/examples/open-chain-2r/joint_config.yaml');
 %
 %       % access expanded data:
@@ -32,32 +26,27 @@ classdef Expander < handle
         ConnectionInfo (:,1) struct          % struct array: socketNode, plugNode, closed, label
         Poses                              % containers.Map: frame name → 4×4 sym homogeneous transform
         LibDir         (1,:) char            % absolute path to the module library directory
-        JointVarMap                       % containers.Map: canonical var name (e.g. 'joint1.q') → sym handle
+        JointVarMap                       % containers.Map: canonical var name (e.g. 'joint1.q') → symbolic handle
         JointValues                       % containers.Map: canonical var name → numeric value (populated by evaluateNumeric)
         EdgeGraph_                          % ir.EdgeGraph handle (public read for TaskFrame)
     end
 
     % ---- private properties ----
     properties (Access = private)
-        DefCache_                           % containers.Map: module_type → parsed module def
-        DefaultConfigPath_  (1,:) char = '' % saved default path for evaluateNumeric()
+        DefCache_                           % containers.Map: module_type → parsed module def, cached to avoid reloading YAML for repeated types
     end
 
     % ---- public methods ----
     methods
 
         %% Constructor: run the full DSL→IR expansion pipeline (pure symbolic).
-        %   obj = Expander(DSLYAML, CONFIGYAML)
-        %     DSLYAML    : path to mechanism-assembly DSL file
-        %     CONFIGYAML : (optional) path to per-instance joint variable config.
-        %                  Saved as default for later evaluateNumeric() calls;
-        %                  NOT consumed during expansion (all joints are sym).
-        function obj = Expander(dslYaml, configYaml)
+        %   obj = Expander(DSLYAML)
+        %     DSLYAML : path to mechanism-assembly DSL file
+        function obj = Expander(dslYaml)
             if nargin < 1 || isempty(dslYaml)
                 error('ir:Expander:usage', ...
-                    'Usage: ir.Expander(dslYaml[, configYaml])');
+                    'Usage: ir.Expander(dslYaml)');
             end
-            if nargin < 2; configYaml = ''; end
 
             % ---- resolve paths ----
             % 'here' = scripts/matlab/ (two levels up from +ir/)
@@ -86,23 +75,18 @@ classdef Expander < handle
             dimCfgPath = fullfile(obj.LibDir, 'config', 'dimensions.yaml');
             if exist(dimCfgPath, 'file'); dimCfg = core.readYaml(dimCfgPath); end
 
-            % save default config path for later evaluateNumeric() calls
-            if ~isempty(configYaml)
-                obj.DefaultConfigPath_ = core.PathUtils.resolve(configYaml, here);
-            end
+            % --- initialize internal state ---
+            obj.EdgeGraph_ = ir.EdgeGraph();
+            obj.DefCache_ = containers.Map('KeyType', 'char', 'ValueType', 'any');
+            obj.JointVarMap = containers.Map('KeyType', 'char', 'ValueType', 'any');
+            obj.Instances = struct('name', {}, 'type', {}, 'md', {}, ...
+                'bodies', {}, 'frames', {}, 'joints', {});
 
             % ---- expand instances ----
             assert(isfield(dsl, 'instances') && isstruct(dsl.instances), ...
                 'Mechanism %s declares no instances.', obj.MechName);
             instNames = fieldnames(dsl.instances);
             nInst = numel(instNames);
-
-            obj.EdgeGraph_ = ir.EdgeGraph();
-            obj.DefCache_ = containers.Map('KeyType', 'char', 'ValueType', 'any');
-            obj.JointVarMap = containers.Map('KeyType', 'char', 'ValueType', 'any');
-
-            obj.Instances = struct('name', {}, 'type', {}, 'md', {}, ...
-                'bodies', {}, 'frames', {}, 'joints', {});
 
             for i = 1:nInst
                 iname = instNames{i};
@@ -128,7 +112,7 @@ classdef Expander < handle
                 assert(~isempty(fa), 'Connection %d: unknown port "%s".', c, refA);
                 assert(~isempty(fb), 'Connection %d: unknown port "%s".', c, refB);
 
-                % polarity check: one socket + one plug
+                % -- polarity check: one socket + one plug --
                 polA = fa.polarity; polB = fb.polarity;
                 if strcmp(polA, 'socket') && strcmp(polB, 'plug')
                     sk = fa; pl = fb;
@@ -142,7 +126,7 @@ classdef Expander < handle
                         core.CommonUtils.tern(isempty(polB), 'none', polB));
                 end
 
-                % connection parameters: roll and symmetry
+                % -- connection parameters: roll and symmetry --
                 roll = core.CommonUtils.field(cn, 'roll', 0);
                 sym = core.CommonUtils.field(sk, 'symmetry', 4);
                 isClosed = isequal(core.CommonUtils.field(cn, 'closed', false), true);
@@ -168,31 +152,22 @@ classdef Expander < handle
 
         %% evaluateNumeric  Substitute joint values from config and return numeric Poses.
         %   posesNum = obj.evaluateNumeric(CONFIGYAML)
-        %     CONFIGYAML : (optional) path to per-instance joint variable config.
-        %                  If omitted, uses the path saved at construction time.
+        %     CONFIGYAML : path to per-instance joint variable config (required).
         %     posesNum   : containers.Map — frame name → 4×4 double transform,
         %                  suitable for viz rendering or numeric IK.
         %
         %   The config file is keyed by instance name → {variable: value},
-        %   e.g. joint1: {q: 0.5236}.  Joint variables not listed in the
-        %   config default to 0 (zero pose).  Geometric parameters are
-        %   already baked into the fixed transforms as doubles and are not
-        %   affected by this substitution.
         function posesNum = evaluateNumeric(obj, configYaml)
             if nargin < 2 || isempty(configYaml)
-                configYaml = obj.DefaultConfigPath_;
+                error('ir:Expander:evaluateNumeric', ...
+                    'Usage: obj.evaluateNumeric(configYaml) — configYaml is required.');
             end
 
-            % build substitution lists: default all joint vars to 0,
-            % then override with values from config when available
-            subsVars = sym([]);
-            subsVals = [];
-            % seed all registered joint variables with 0 (zero pose)
+            % -- extract all symbolic joint variables --
             jvKeys = keys(obj.JointVarMap);
-            for k = 1:numel(jvKeys)
-                subsVars(end+1) = obj.JointVarMap(jvKeys{k}); %#ok<AGROW>
-                subsVals(end+1) = 0;                           %#ok<AGROW>
-            end
+            valsCell = values(obj.JointVarMap); % cell array: {sym('joint1.q'), sym('joint2.q'), ...}
+            subsVars = [valsCell{:}]; % sym array: [sym('joint1.q'), sym('joint2.q'), ...]
+            subsVals = zeros(1, numel(jvKeys)); % seed with zeros
 
             % overlay config values when a config file is provided
             if ~isempty(configYaml)
@@ -201,11 +176,13 @@ classdef Expander < handle
                 if exist(configYaml, 'file')
                     jointCfg = core.readYaml(configYaml);
                     instNames = fieldnames(jointCfg);
+                    % loop over all instances in the config
                     for ii = 1:numel(instNames)
                         iname = instNames{ii};
                         ov = jointCfg.(iname);
                         if ~isstruct(ov); continue; end
                         varNames = fieldnames(ov);
+                        % loop over all variable names in the instance config and update subsVals if the canonical name is found in JointVarMap
                         for jj = 1:numel(varNames)
                             canonicalName = [iname '.' varNames{jj}];
                             if isKey(obj.JointVarMap, canonicalName)
@@ -229,15 +206,17 @@ classdef Expander < handle
             % substitute into every entry of the symbolic Poses map
             posesNum = containers.Map('KeyType', 'char', 'ValueType', 'any');
             ks = keys(obj.Poses);
+            % loop over all nodes in the symbolic Poses map and evaluate numeric transforms
             for k = 1:numel(ks)
-                frameName = ks{k};
-                T_sym = obj.Poses(frameName);
+                nodeName = ks{k};
+                T_sym = obj.Poses(nodeName);
                 if isempty(subsVars)
                     T_num = double(T_sym);
                 else
+                    % substitute symbolic joint variables with numeric values and evaluate to double
                     T_num = double(subs(T_sym, subsVars, subsVals));
                 end
-                posesNum(frameName) = T_num;
+                posesNum(nodeName) = T_num;
             end
         end
 
@@ -251,18 +230,18 @@ classdef Expander < handle
             if isKey(obj.DefCache_, itype)
                 md = obj.DefCache_(itype);
             else
+                % fp: full path to module YAML file (e.g. <libDir>/pipette.yaml)
                 fp = fullfile(obj.LibDir, [itype '.yaml']);
                 assert(exist(fp, 'file') > 0, ...
                     'Instance "%s": module type "%s" not found in %s.', ...
                     iname, itype, obj.LibDir);
+                
+                % md: parsed module definition (struct) from YAML
                 md = core.readYaml(fp);
                 obj.DefCache_(itype) = md;
             end
 
             % inject geometric parameters (cubeLength, tipDistance, ...)
-            % from <module_library>/config/dimensions.yaml
-            % (joint variables are always symbolic — numeric substitution
-            %  is deferred to evaluateNumeric())
             params = struct();
             if isfield(dimCfg, itype)
                 params = dimCfg.(itype);
@@ -295,9 +274,6 @@ classdef Expander < handle
                 % auto-register root frames for FK propagation.
                 % semantic_tag='root' (e.g. ToolPipette.connector_side) marks
                 % a frame as the propagation seed (pose = eye(4)).
-                % semantic_tag='ground' (e.g. Manipulator.ground) is a separate
-                % tag for L3 world-binding endpoint identification — it does
-                % NOT trigger auto-registration here.
                 if strcmp(core.CommonUtils.field(f, 'semantic_tag', ''), 'root')
                     obj.EdgeGraph_.addRoot(node);
                 end
@@ -307,8 +283,11 @@ classdef Expander < handle
             fts = core.CommonUtils.asList(core.CommonUtils.field(md, 'fixed_transforms', {}));
             for k = 1:numel(fts)
                 t = fts{k};
+                % evaluate translation vector from struct (x, y, z) or list [x, y, z]
                 tr = core.CommonUtils.evalVec(t.translation, params);
+                % compute rotation matrix from rotation struct (rpy, axis_angle, or align)
                 R = core.RigidBodyMath.rot(t.rotation, params);
+                % synthesize 4x4 homogeneous transform and add to EdgeGraph
                 T = core.RigidBodyMath.T(R, tr);
                 obj.EdgeGraph_.addFixedTransform([pre t.from_frame], [pre t.to_frame], T);
             end
@@ -328,6 +307,7 @@ classdef Expander < handle
                 % register in JointVarMap for forward lookup from canonical name
                 obj.JointVarMap(symName) = val;
                 obj.EdgeGraph_.addJoint([pre j.from_frame], [pre j.to_frame], ax, val, kind);
+                % unit vector normalization to avoid singularities in FK propagation; ax(:) converts ax to column vector
                 jList{k} = struct('node', [pre j.from_frame], ...
                     'axis', ax(:) / max(norm(ax), eps), ...
                     'var', j.variable, 'val', val, 'kind', kind);
@@ -351,7 +331,9 @@ classdef Expander < handle
         function f = localLookupFrame(obj, instName, portName)
             f = [];
             for i = 1:numel(obj.Instances)
+                % skip instances that don't match the requested name
                 if ~strcmp(obj.Instances(i).name, instName); continue; end
+
                 for k = 1:numel(obj.Instances(i).frames)
                     if strcmp(obj.Instances(i).frames{k}.name, portName)
                         f = obj.Instances(i).frames{k};

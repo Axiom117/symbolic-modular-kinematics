@@ -38,75 +38,21 @@ struct('from', <char>, 'to', <char>, 'T', <4×4 double>, 'kind', <char>)
 
 ## 2. fixed 边
 
-### 2.1 插入规则
-
-双向插入：`from→to`（正向）和 `to→from`（逆向，取 $T^{-1}$）。
-
-```matlab
-% EdgeGraph.m L48-53
-function addFixedTransform(obj, from, to, T)
-    obj.addEdge(from, to, T, 'fixed');
-    obj.addEdge(to, from, localInvT(T), 'fixed');
-end
-```
-
-### 2.2 变换公式
-
-$T$ 由模块定义中的 `translation` + `rotation` 组合而成：
+双向插入（`EdgeGraph.addFixedTransform`，L48-53）。变换公式：
 
 $$T = \begin{bmatrix} R & t \\ 0 & 1 \end{bmatrix}$$
 
-- $R$：由 `rotation` 字段求值（支持 `align` / `rpy` / `axis_angle`，见 `RigidBodyMath.rot`）
-- $t$：由 `translation` 字段求值（3×1 向量，单位 mm）
-
-### 2.3 用途
-
-- 模块内部 body↔frame 之间的刚性连接
-- 模块内部 body↔hinge 之间的展开参考变换
-- 参数化：`translation` 和 `rotation` 可为符号表达式（如 `cubeLength/2`），在展开时通过参数注入求值为数值
-
----
+$R$ 由 `rotation` 字段求值（`align`/`rpy`/`axis_angle`），$t$ 由 `translation` 求值（mm）。用于模块内部 body↔frame 刚性连接，参数可为符号表达式（如 `cubeLength/2`）。
 
 ## 3. joint 边
 
-### 3.1 插入规则
+双向插入（`EdgeGraph.addJoint`，L58-63）。变换公式：
 
-双向插入，同 `fixed`。
+**revolute**：$T = \begin{bmatrix} R_{\text{axis}}(q) & 0 \\ 0 & 1 \end{bmatrix}$（Rodrigues 公式）
 
-```matlab
-% EdgeGraph.m L58-63
-function addJoint(obj, from, to, axis, value, kind)
-    T = core.PosePropagator.jointTransform(kind, axis, value);
-    obj.addEdge(from, to, T, 'joint');
-    obj.addEdge(to, from, localInvT(T), 'joint');
-end
-```
+**prismatic**：$T = \begin{bmatrix} I & d \\ 0 & 1 \end{bmatrix}, \quad d = \frac{\text{axis}}{\|\text{axis}\|} \cdot \text{value}$
 
-### 3.2 变换公式
-
-**revolute**（转动副）：绕轴 `axis` 旋转角度 `value`（rad）
-
-$$T = \begin{bmatrix} R_{\text{axis}}(\text{value}) & 0 \\ 0 & 1 \end{bmatrix}$$
-
-其中 $R_{\text{axis}}(\theta) = I + \sin\theta \cdot K + (1-\cos\theta) \cdot K^2$（Rodrigues 公式，`RigidBodyMath.axang`）。
-
-**prismatic**（移动副）：沿轴 `axis` 平移距离 `value`（mm）
-
-$$T = \begin{bmatrix} I & d \\ 0 & 1 \end{bmatrix}, \quad d = \frac{\text{axis}}{\|\text{axis}\|} \cdot \text{value}$$
-
-```matlab
-% PosePropagator.m L12-25
-function T = jointTransform(kind, ax, val)
-    switch lower(kind)
-        case 'prismatic'
-            n = norm(ax);
-            if n < eps; d = [0;0;0]; else; d = ax(:)/n * val; end
-            T = core.RigidBodyMath.T(eye(3), d);
-        otherwise  % revolute
-            T = core.RigidBodyMath.T(core.RigidBodyMath.axang(ax, val), [0;0;0]);
-    end
-end
-```
+零位（value=0）时 $T = I_4$。
 
 ### 3.3 零位约定
 
@@ -116,71 +62,22 @@ end
 
 ## 4. mate 边
 
-### 4.1 插入规则
-
-双向插入（生成树边）：`socket→plug` 和 `plug→socket`（逆向取 $T_m^{-1}$）。
-
-```matlab
-% EdgeGraph.m L70-82
-function addMate(obj, socket, plug, roll, symmetry)
-    rollAngle = roll * 2 * pi / symmetry;
-    Tm = core.RigidBodyMath.T( ...
-        core.RigidBodyMath.rotz(rollAngle) * core.RigidBodyMath.rotx(pi), ...
-        [0; 0; 0]);
-    obj.addEdge(socket, plug, Tm, 'mate');
-    obj.addEdge(plug, socket, localInvT(Tm), 'mate');
-end
-```
-
-### 4.2 变换公式（冻结）
+双向插入生成树边（`EdgeGraph.addMate`，L70-82）。
 
 $$T_{\text{plug} \leftarrow \text{socket}} = R_z\!\left(\text{roll} \cdot \tfrac{2\pi}{\text{symmetry}}\right) \cdot R_x(\pi), \qquad t = 0$$
 
-- **`Rx(π)`**（冻结）：绕端口 +X 翻转 180°，使两端口 +Z 反平行（面对面对插）
-- **`Rz(...)`**：绕公共对插法向的离散滚转
-- **平移为零**：两对接面原点相触
-
-### 4.3 参数
-
-| 参数 | 默认值 | 来源 | 说明 |
-|------|------|------|------|
-| `roll` | 0 | DSL 连接字段 | 离散滚转索引，整数 0..symmetry-1 |
-| `symmetry` | 4 | socket frame 的 `symmetry` 字段 | 绕 +Z 旋转对称阶 |
-
-### 4.4 方向约定
-
-Socket→Plug 为正向。父/子由极性决定（socket 为父，plug 为子），不由 DSL `ports` 书写顺序决定。
+- `Rx(π)`（冻结）：绕 +X 翻转 180°，使两端口 +Z 反平行
+- `Rz(...)`：离散滚转（`roll`=0..symmetry-1，缺省 symmetry=4）
+- 方向约定：Socket→Plug 为正向（由极性决定，不由 DSL `ports` 书写顺序）
 
 ---
 
 ## 5. closed_mate 边
 
-### 5.1 插入规则
+**单向插入**（`EdgeGraph.addClosedMate`，L88-98）：仅 `socket→plug`。变换公式同 §4。
 
-**单向插入**（弦边 / chord edge）：仅 `socket→plug`，不插入逆向边。
-
-```matlab
-% EdgeGraph.m L88-98
-function addClosedMate(obj, socket, plug, roll, symmetry)
-    rollAngle = roll * 2 * pi / symmetry;
-    Tm = core.RigidBodyMath.T( ...
-        core.RigidBodyMath.rotz(rollAngle) * core.RigidBodyMath.rotx(pi), ...
-        [0; 0; 0]);
-    obj.addEdge(socket, plug, Tm, 'closed_mate');
-end
-```
-
-### 5.2 变换公式
-
-与 `mate` 完全相同（§4.2）。
-
-### 5.3 语义
-
-- **不参与 FK 传播**：`closed_mate` 是闭环的切口（cut），若用于传播会将位姿穿过闭环，导致不一致。
-- **诊断专用**：仅用于计算闭环残差（mate gap / Zdot）。在可视化中以橙色粗虚线标出。
-- **toStruct 排除**：传播前被过滤掉（§6）。
-
----
+- **不参与 FK 传播**：toStruct 过滤（§6），诊断专用（计算闭环残差 gap/Zdot）
+- **可视化**：橙色粗虚线
 
 ## 6. toStruct 过滤规则
 

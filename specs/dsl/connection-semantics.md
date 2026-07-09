@@ -91,6 +91,40 @@ connections:
 `roll` 永远落在对称群内，机械上必然装得上。**真正需要运行时连续绕法向转动**的场合，
 不用 `roll`，而是插入一个 revolute `Joint` 模块（轴取公共法向）——那是真自由度（§5）。
 
+### 3.5 roll 的传播性与 Joint 配对规则
+
+**关键行为**：`roll` 作用于一条连接上，会**永久旋转连接下游所有模块的朝向**。
+这是因为 `roll` 通过 mate 变换 $R_z(\text{roll} \cdot 360^\circ / \text{symmetry})$ 旋转了子端口所属
+刚体的整体系，该刚体上所有其他端口（包括出向端口）的坐标系也随之旋转。
+后续连接均以此旋转后的坐标系为参考，因此 `roll` 的影响**沿连接链向下游传播，永不自动撤销**。
+
+**Joint 模块的配对规则**：Joint 模块拥有两个端口（`linkA` 和 `linkB`），分别连接上游和下游模块。
+若仅在一侧设置 `roll`（如 `roll: 1`），则不仅旋转了关节轴方向，还会使**下游所有模块的朝向永久偏移**。
+为了**仅旋转关节轴而不影响下游**，必须在 Joint 两端**成对使用 `roll`**：
+
+```yaml
+# 正确：roll 成对出现，关节轴旋转 90° 对齐 X 轴，下游不受影响
+connections:
+  - ports: [frame_upstream.faceZPlus, joint.linkA]
+    roll: 1          # 旋转关节体，对齐关节轴
+  - ports: [joint.linkB, frame_downstream.faceZMinus]
+    roll: -1         # 反向旋转，恢复下游朝向
+```
+
+**原理**：第一条连接（`roll: 1`）将 Joint 刚体绕对插法向旋转 90°，关节轴随之转动；
+第二条连接（`roll: -1`）在 Joint 的出向端口处以等量反向旋转抵消，
+使得下游 `frame_downstream` 的最终朝向与未设置 `roll` 时一致。
+**净效果**：仅关节轴方向改变，下游模块朝向保持不变。
+
+**何时需要配对**：
+- 当 Joint 的默认旋转轴方向与机构运动平面不平行时（如默认轴沿 Y，而平行四边形变形沿 XZ 平面），
+  需要在 Joint 两端使用 `roll: 1` / `roll: -1` 配对将轴旋转到正确方向。
+- 若希望 `roll` 的旋转效果有意传播到下游（如整条支链需要统一旋转朝向），则仅在入口侧设置 `roll`，
+  不在出口侧设反向 `roll`。
+
+**对非 Joint 模块**（Frame、Pin 等）：`roll` 的传播行为同样存在，但由于这些模块的端口在对称群内
+不可区分（`symmetry` 对称性），`roll` 的实际几何效果可能不可观测（§3.3）。
+
 ---
 
 ## 4. 极性门控
@@ -135,81 +169,21 @@ connections:
 
 ### 6.2 解释器如何处理
 
-被 `closed: true` 标记的连接，在 IR 中**照常施加 §2 的 mate 变换**（两端口几何上贴合），
-但**不参与 FK 位姿传播**——它作为单向诊断边（`kind: closed_mate`）存在于图中，
-仅用于报告闭环残差（gap / `+Z` 反平行度）。位姿传播沿生成树边进行，不穿过弦边。
+被 `closed: true` 标记的连接，在 IR 中**照常施加 §2 的 mate 变换**，但**不参与 FK 位姿传播**——它作为单向诊断边（`kind: closed_mate`，见 `port-attachment.md`）存在于图中。A.4 阶段在此切开回路，生成 `Constraint`。
 
-区别在于 **A.4 闭环阶段**：解释器识别该连接为回路补边，在此处**切开**回路，生成一个 `Constraint`。
-
-#### 6.2.1 残差公式
+**残差公式**（与 L3 世界系闭环共用）：
 
 $$T_{\text{residual}} = T_{\text{far}}^{-1} \cdot T_{\text{near}}$$
 
-物理场景：`closed: true` 连接的切口两侧有两个坐标系 `F_near` 和 `F_far`。物理上若环路闭合，
-二者应为空间中同一坐标系；但解释器沿两条不同支路分别从共同祖先（或 `world`）正向传播到这两个
-坐标系，得到两个位姿：
-
 | 符号 | 含义 |
 |------|------|
-| $T_{\text{near}}$ | `F_near` 在 `world` 下的位姿，沿**支路 A**（树边侧）传播 |
-| $T_{\text{far}}$ | `F_far` 在 `world` 下的位姿，沿**支路 B**（补边侧）传播 |
-| $T_{\text{residual}}$ | `F_near` 在 `F_far` 坐标系下的**相对位姿**（$F_{\text{far}} \to \text{world} \to F_{\text{near}}$） |
+| $T_{\text{near}}$ | `F_near` 在 `world` 下的位姿（沿树边侧传播） |
+| $T_{\text{far}}$ | `F_far` 在 `world` 下的位姿（沿补边侧传播） |
+| $T_{\text{residual}}$ | `F_near` 相对 `F_far` 的位姿；环路闭合时 $= I$ |
 
-环路物理闭合时 $T_{\text{residual}} = I$（单位矩阵），即平移分量 $(t_x, t_y, t_z) = (0,0,0)$、
-旋转分量为零。实际上因为关节变量未必满足闭环条件，$T_{\text{residual}} \neq I$，求解器的目标
-就是调节关节变量将其压到零。
+6 个候选残差分量 $[t_x, t_y, t_z, r_x, r_y, r_z]$（平移 mm，姿态 Z-Y-X 欧拉角 rad）。具体约束哪些分量子集由 L3 `constrained_components` 决定（见 A.4 设计）。
 
-从 $T_{\text{residual}}$ 中提取 6 个候选残差分量 $[t_x, t_y, t_z, r_x, r_y, r_z]$
-（平移 mm，姿态 Z-Y-X 欧拉角 rad）。**不是所有 6 个都要归零**——具体约束哪些分量子集
-由**机构 DOF 分析与 L3 执行配置的 `constrained_components`** 决定，**不在 DSL 中声明**
-（`grammar.md` §1.2、§5.5）。
-
-#### 6.2.2 `closed` 标签在下游流水线中的意义
-
-`closed` 是一个**纯标记位**，本身不携带几何或求解参数，但在后续每一层都有精确分工：
-
-| 流水线阶段 | `closed` 的作用 |
-|------|------|
-| **A.3 IR 展开** | 施加 mate 变换并插入单向 `closed_mate` 边（与普通 mate 的双向边不同）。该边不参与 FK 传播（`toStruct()` 排除 `closed_mate`），仅保留在图中供诊断 |
-| **A.3.2 IR 校验** | 验证 `closed: true` 连接确实闭合 L2 回路（不悬空）、独立回路数与标记数一致（不欠标/多标） |
-| **A.3.3 开环 FK** | 作为「不可处理」信号：含 `closed: true` 的机构不能走纯开环 FK 管线，须路由到 A.4 |
-| **A.4 回路识别** | 显式指定切口位置，区分树边与补边（chord），避免解释器自行猜测切口 |
-| **A.4 约束构造** | 切口两侧 frame 对 $(F_{\text{near}}, F_{\text{far}})$ 直接取自补边连接的两端；每个 `closed: true` → 一个独立回路 → 一个 `Constraint` |
-| **A.5 求解器** | 不直接读取 `closed`；它接收 A.4 输出的符号残差表达式与变量分区，用 `fmincon` SQP 数值求解 |
-
-`closed` **不携带**的信息（全部归 L3 execution-config）：
-- 切口哪些分量需要归零（`constrained_components`）
-- 哪些关节是驱动/未知量（`actuated_joints` / `external_drivers`）
-- 收敛阈值、初值等求解配置
-
-#### 6.2.3 mate 变换与关节角度的关系
-
-**mate 变换始终正确施加，不受关节角度影响。** mate 变换 $R_z(\text{roll}) \cdot R_x(\pi)$
-是纯几何操作，只依赖连接级 `roll` 和端口 `symmetry`，与关节变量完全无关。它唯一的作用是把
-两个端口坐标系面对面贴合（`+Z` 反平行、原点重合）。
-
-错位的真正来源不在 mate 变换，而在**全局 FK 传播**：mate 变换保证了局部对接正确，但若关节
-变量不满足闭环约束，沿两条支路分别传播到切口两侧 frame 的全局位姿就会不一致——两个 frame
-的原点和朝向在空间中不重合。这不是 mate 变换的失败，而是「关节值不闭合」的几何后果。
-
-#### 6.2.4 DSL 可视化中的闭环行为
-
-A.2.5 可视化不做闭环求解，只做装配渲染：
-
-- **普通连接**：施加双向 mate 边（`addMate`），参与 FK 位姿传播。
-- **`closed: true` 连接**：施加单向诊断 mate 边（`addClosedMate`），mate 变换照常施加但
-  **不参与 FK 位姿传播**。闭合诊断线以橙色粗虚线渲染，用于报告该关节配置下的闭环残差
-  （gap 与 `+Z` 反平行度）。
-- 关节变量的具体数值通过 per-example `joint_config.yaml`（如
-  `specs/dsl/examples/open-chain-2r/joint_config.yaml`）按实例名注入；若未提供，默认取零位。
-- **开环机构**：零位默认值即正确装配。
-- **L2 闭环机构**（如四杆环）：零位是特意设计为满足闭环的参考构型（A.4.4 过关标准要求
-  「残差表达式经手工代入零位构型验证恒为零」）。若用户提供非零位的关节值且不满足闭环约束，
-  `closed: true` 连接处会出现肉眼可见错位（橙色诊断线显示非零 gap）——此时可视化忠实地反映了
-  「这组关节值不闭合」的事实，并非渲染错误。
-- **L3 世界系闭环机构**（如 M-REx 主构型）：DSL 中**没有 `closed: true`**，机构本体是
-  挂在两个 `Manipulator` 之间的开环链。两个 `Manipulator.ground` frame（`semantic_tag: ground`）
-  由 `mechanism.m` 自动注册为 ground node——可视化中它们重合在原点处即表示「闭合」。详见 §6.4。
+> `closed` 在下游管线（IR 展开 → 校验 → FK → 回路识别 → 约束构造 → 求解）的完整行为表见 `port-attachment.md`。可视化表现见 `ARCHITECTURE.md`。
 
 ### 6.3 多闭环
 
@@ -220,79 +194,18 @@ A.2.5 可视化不做闭环求解，只做装配渲染：
 
 ### 6.4 L2 闭环 vs L3 世界系闭环
 
-`closed` **只标记在 L2 机构图内部即闭合的回路**（如四杆环、并联平台的支链环）。
-若回路仅在 L3 绑定 `world` 与外部驱动后才闭合（M-REx 主构型：世界原点 → 驱动 #1 → 机构 → 驱动 #2 → 世界原点），
-则**不写 `closed`**——该闭合由 L3 execution-config 的 `closure_cuts` 声明（`grammar.md` §5.7）。
-
-#### 6.4.1 M-REx 主构型：闭合发生在世界原点
-
-M-REx 主构型的实际拓扑是：
-
-```
-world 原点 ──[ground]── Manipulator1 ──[dock]── Adaptor ── 机构本体 ── Adaptor ──[dock]── Manipulator2 ──[ground]── world 原点
-```
-
-关键特征：
-
-- 两个 `Manipulator` 各有一个 `ground` frame（`semantic_tag: ground`，无极性）。
-- 在 L3 execution-config 中，两个 `ground` frame 都绑定到同一个 `world` 原点。
-- 机构本体（两个 `Adaptor` 之间的模块链）是**开环的**——DSL 中没有任何 `closed: true`。
-- 「回路」的形成是因为两条独立树（`world → Manipulator1 → 机构` 和 `world → Manipulator2 → 机构`）共享同一个 `world` 根和同一段机构本体——闭合判据不是端口对插，而是两条支路到达机构本体同一点时位姿应一致。
-
-#### 6.4.2 两种闭合的对比
+`closed` **只标记在 L2 机构图内部即闭合的回路**。若回路仅在 L3 绑定 `world` 与外部驱动后才闭合（M-REx 主构型），则不写 `closed`——由 L3 execution-config 的 `closure_cuts` 声明。
 
 | | L2 内部闭环（四杆环） | L3 世界系闭环（M-REx） |
 |---|---|---|
-| 闭合位置 | 两个模块端口之间 | 两个 `ground` frame 绑到同一 `world` 原点 |
-| DSL 中是否写 `closed` | **是**，在连接级标记 | **否**，DSL 中机构本体是开环链 |
-| 切口声明位置 | DSL `connections` 的 `closed: true` | L3 execution-config 的 `closure_cuts` |
-| 约束生成 | A.4 在补边连接的端口 frame 对处切开 | A.4 在 L3 指定的切口位置切开（如机构本体两端） |
-| 可视化中的闭合表现 | 一条 mate 边连接两端口，含 `closed` 标记 | 两个 `Manipulator` 的 `ground` frame 重合在 `world` 原点；机构本体是开环链挂在两者之间 |
-| 可视化错位表现 | `closed: true` 连接处端口不重合 | 机构本体两端的位姿不一致（从 Manipulator1 传播和从 Manipulator2 传播得到的位姿不相等） |
-
-#### 6.4.3 M-REx 构型在可视化中的表现
-
-A.2.5 可视化读取 DSL 机构文件后：
-
-1. `mechanism.m` 在展开模块实例时，检测 `semantic_tag: root` 的 frame（如
-   `ToolPipette.tip_origin`），自动调用 `g.addRoot()` 将其注册为 root node——
-   所有 root node 在 FK 传播时以 `eye(4)` 为初始位姿（即 world 原点）。
-   `semantic_tag: ground`（如 `Manipulator.ground`）是独立的标签，仅标识 L3 世界绑定端点，
-   不触发 root 自动注册。
-2. 在工具端生长范式下，FK 从 root node（工具端）向外传播到 `Manipulator` 端。
-   在 L3 世界系闭环执行中，两个 `Manipulator.ground` frame 绑定到同一 `world` 原点，形成回路。
-3. 分别沿 `Manipulator1` 和 `Manipulator2` 的内部链做 FK 传播，机构本体挂在两者之间。
-4. 没有 `closed: true` 边需要渲染——两张 `ground` frame 在原点重合就是「回路闭合」的几何表现。
-
-如果 Manipulator 的关节值（`dx, dy, dz`）使得机构本体两端位姿不一致，可视化不会像 L2 闭环
-那样显示一条错位的 mate 边，而是表现为机构本体两端不连续——这同样是「关节值不闭合」的
-忠实反映。
-
-#### 6.4.4 M-REx 构型的约束生成（A.4）
-
-虽然 DSL 中没有 `closed: true`，A.4 仍然需要为此构型生成闭环约束。流程是：
-
-1. L3 execution-config 声明 `closure_cuts`：指定切口位置（如机构本体两端的两个 frame）。
-2. A.4 沿两条支路分别传播到切口 frame 对：
-   - 支路 A：`world → Manipulator1 → … → F_near`
-   - 支路 B：`world → Manipulator2 → … → F_far`
-3. 构造 $T_{\text{residual}} = T_{\text{far}}^{-1} \cdot T_{\text{near}}$，与 §6.2.1 同构。
-4. 由 `constrained_components` 指定须归零的分量子集；`external_drivers` 指定 Manipulator
-   的 `dx/dy/dz` 为未知量。
-
-因此从 A.4/A.5 求解器的视角看，L2 闭环和 L3 闭环的**残差公式完全一致**——区别仅在于
-切口位置是谁指定的（DSL `closed` vs L3 `closure_cuts`），以及未知量是谁（L2 内部关节
-vs L3 外部驱动关节）。
+| 闭合位置 | 两个模块端口之间 | 多个 `ground` frame 各带静态标定偏移绑到同一 `world` 参考系 |
+| DSL `closed` | **是** | **否**（机构本体是开环链） |
+| 切口声明位置 | DSL 连接级 `closed: true` | L3 execution-config `closure_cuts` |
+| 残差公式 | $T_{\text{residual}} = T_{\text{far}}^{-1} \cdot T_{\text{near}}$ | 同左 |
+| 可视化表现 | 补边 mate 线（橙色虚线） | 末端（`tip_origin`）在 `world` 原点，各 `ground` frame 在标定偏移位置（详见 `ARCHITECTURE.md`） |
 
 ---
 
-## 7. 与手工推导对照（验证用）
+## 7. 验证参照
 
-对任一连接 `[socket_port, plug_port]`，解释器施加的桥接变换应满足：
-
-- 平移分量为 0（两对接面原点相触）。
-- 子端口 `+Z` 与父端口 `+Z` 反平行（法向面对面）。
-- `roll = 0` 时子端口 `+X` 与父端口 `+X` 对齐；`roll = k` 时子端口绕公共法向再转 `k·360/symmetry` 度。
-
-A.2.5 可视化脚本据此检查：对插处两端口坐标系原点重合、法向相反；A.4 据此验证零位构型下
-`closed` 切口残差恒为零。
+手工推导验证项见各 DSL 案例 README 与 `tests/` 目录。

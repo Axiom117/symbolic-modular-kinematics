@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=../../schema/mechanism-assembly.schema.yaml
+# 开环 2R 链 — 详细文档见同目录 README.md
+
+dsl_version: 0
+mechanism: open_chain_2r
+description: 两段串联转动副的开环链，用于验证变换传播与 FK 输出。
+module_library: ../../../modules/
+
+instances:
+  frame0:
+    type: Frame
+  joint1:
+    type: Joint
+  frame1:
+    type: Frame
+  joint2:
+    type: Joint
+  frame2:
+    type: Frame
+
+connections:
+  # 第一段：frame0(socket) — joint1(plug)
+  - ports: [frame0.faceXPlus, joint1.linkA]
+  - ports: [joint1.linkB, frame1.faceXMinus]
+  # 第二段：frame1(socket) — joint2(plug)
+  - ports: [frame1.faceXPlus, joint2.linkA]
+    roll: 1
+  - ports: [joint2.linkB, frame2.faceXMinus]
+

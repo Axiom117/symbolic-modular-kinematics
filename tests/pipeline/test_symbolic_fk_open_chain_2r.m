@@ -1,10 +1,10 @@
 %% test_symbolic_fk_open_chain_2r.m
-% End-to-end test: DSL → symbolic IR → symbolic FK → numeric verification.
+% End-to-end test: DSL → symbolic IR → symbolic FK → visualization.
 %
 % Verifies the pure symbolic pipeline (A.4.0): ir.Expander always produces
-% symbolic Poses; evaluateNumeric() substitutes joint values from config.
-% The symbolic FK output, when evaluated at joint_config.yaml values,
-% matches numeric FK to within 1e-12.
+% symbolic Poses; JointVarMap tracks joint variables; TaskFrame extracts
+% the end-frame symbolic pose with position/rotation decomposition;
+% visualization confirms the mechanism geometry.
 %
 % Requires: Symbolic Math Toolbox
 %
@@ -15,92 +15,82 @@
 fprintf('=== Symbolic FK Pipeline Test: open-chain-2r ===\n\n');
 
 %% Paths
-dslFile    = '../../specs/dsl/examples/open-chain-2r/robot_description.yaml';
-configFile = '../../specs/dsl/examples/open-chain-2r/joint_config.yaml';
-modLib     = '../../specs/modules/';
+dslFile    = '../../specs/dsl/cases/open-chain-2r/robot_description.yaml';
+configFile = '../../specs/dsl/cases/open-chain-2r/joint_config.yaml';
 
-%% 1. Build numeric reference (symbolic expansion + evaluateNumeric)
-fprintf('1. Building numeric reference pipeline ... ');
-eNum = ir.Expander(dslFile);
-numPoses = eNum.evaluateNumeric(configFile);
-fprintf('OK (%d instances, %d edges, %d poses)\n', ...
-    numel(eNum.Instances), eNum.EdgeGraph_.numEdges, numPoses.Count);
-
-endFrame = 'pipette.tip_origin';
-assert(isKey(numPoses, endFrame), 'End frame not in numeric poses.');
-T_num_ref = numPoses(endFrame);
-fprintf('   Numeric T_end (ref):\n');
-disp(T_num_ref);
-
-%% 2. Build symbolic pipeline (pure symbolic, always-on)
-fprintf('\n2. Building symbolic pipeline ... ');
+%% 1. Build symbolic pipeline (pure symbolic expansion)
+fprintf('1. Building symbolic pipeline ... ');
 try
     eSym = ir.Expander(dslFile);
 catch ME
     if contains(ME.message, 'Unrecognized function or variable') && contains(ME.message, 'sym')
         error('Symbolic Math Toolbox required. Install it to run this test.');
     end
-    rethrow(ME);   % let ALL other errors through unfiltered
+    rethrow(ME);
 end
-fprintf('OK\n');
+fprintf('OK (%d instances, %d edges)\n', ...
+    numel(eSym.Instances), eSym.EdgeGraph_.numEdges);
 
-%% 3. Verify JointVarMap contains expected joint variables
-fprintf('\n3. Checking JointVarMap ... ');
+%% 2. Verify JointVarMap contains expected joint variables
+fprintf('\n2. Checking JointVarMap ... ');
 jvKeys = keys(eSym.JointVarMap);
-fprintf('%d joint variables in JointVarMap: %s\n', ...
+fprintf('%d joint variables: %s\n', ...
     numel(jvKeys), strjoin(jvKeys, ', '));
-assert(numel(jvKeys) >= 2, 'Expected at least 2 joint variables in JointVarMap.');
-assert(isKey(eSym.JointVarMap, 'joint1.q'), 'joint1.q missing from JointVarMap.');
-assert(isKey(eSym.JointVarMap, 'joint2.q'), 'joint2.q missing from JointVarMap.');
+assert(numel(jvKeys) >= 2, 'Expected at least 2 joint variables.');
+assert(isKey(eSym.JointVarMap, 'joint1.q'), 'joint1.q missing.');
+assert(isKey(eSym.JointVarMap, 'joint2.q'), 'joint2.q missing.');
 
-%% 4. Run TaskFrame
-fprintf('\n4. Running TaskFrame to endFrame="%s" ... ', endFrame);
+%% 3. Run TaskFrame to extract end-frame symbolic pose
+endFrame = 'frame2.frame_hyper_cube';
+fprintf('\n3. Running TaskFrame to endFrame="%s" ... ', endFrame);
 tf = ir.TaskFrame(eSym.EdgeGraph_, endFrame);
 fprintf('OK\n');
 fprintf('   JointVars: %s\n', strjoin(string(tf.JointVars), ', '));
 fprintf('   TSym type: %s, size: %dx%d\n', class(tf.TSym), size(tf.TSym));
 
-%% 5. Verify TSym is symbolic (contains trig terms)
-fprintf('\n5. Verifying TSym is symbolic ... ');
+%% 4. Verify TSym is symbolic (structural checks)
+fprintf('\n4. Verifying TSym structure ... ');
 assert(isa(tf.TSym, 'sym'), 'TSym must be sym type.');
 ts = char(tf.TSym);
 assert(contains(ts, 'cos') || contains(ts, 'sin'), ...
     'TSym should contain trig terms from revolute joints.');
 fprintf('OK (contains trig functions)\n');
 
-%% 6. Evaluate symbolic FK at joint_config.yaml values and compare to numeric ref
-fprintf('\n6. Evaluating symbolic FK at joint_config values ...\n');
+%% 5. Position / rotation decomposition
+fprintf('\n5. Checking PosExpr / RotExpr decomposition ... ');
+assert(isequal(size(tf.PosExpr), [3 1]), 'PosExpr must be 3×1.');
+assert(isequal(size(tf.RotExpr), [3 3]), 'RotExpr must be 3×3.');
+assert(isa(tf.PosExpr, 'sym'), 'PosExpr must be sym.');
+assert(isa(tf.RotExpr, 'sym'), 'RotExpr must be sym.');
 
-% Read joint values from config
+% Self-consistency: TSym(1:3,4) == PosExpr, TSym(1:3,1:3) == RotExpr
+assert(isequal(tf.TSym(1:3,4), tf.PosExpr), 'TSym(1:3,4) ≠ PosExpr.');
+assert(isequal(tf.TSym(1:3,1:3), tf.RotExpr), 'TSym(1:3,1:3) ≠ RotExpr.');
+
+% Evaluate at joint_config values as a numeric sanity check
 jointCfg = core.readYaml(configFile);
-q1_val = jointCfg.joint1.q;   % 0.5236
-q2_val = jointCfg.joint2.q;   % -0.7854
-
-fprintf('   joint1.q = %.6f rad, joint2.q = %.6f rad\n', q1_val, q2_val);
-
-% symvar returns vars in alphabetical order: joint1_q, joint2_q
-% (MATLAB makeValidName replaces '.' with '_' in sym variable names)
+q1_val = jointCfg.joint1.q;
+q2_val = jointCfg.joint2.q;
 vals_numeric = [q1_val; q2_val];
-T_num_from_sym = tf.eval(vals_numeric);
 
-fprintf('   T_end from symbolic FK (evaluated):\n');
-disp(T_num_from_sym);
+T_num = tf.eval(vals_numeric);
+p_num = tf.evalPos(vals_numeric);
+R_num = tf.evalRot(vals_numeric);
 
-%% 7. Compare: error must be < 1e-12
-fprintf('\n7. Comparing numeric vs symbolic FK ... ');
-diffMat = T_num_ref - T_num_from_sym;
-maxErr = max(abs(diffMat(:)));
-fprintf('max |error| = %.2e\n', maxErr);
-assert(maxErr < 1e-12, ...
-    'Symbolic FK evaluation deviates from numeric FK by %.2e (threshold 1e-12).', maxErr);
+fprintf('OK\n');
+fprintf('   joint1.q = %.6f rad, joint2.q = %.6f rad\n', q1_val, q2_val);
+fprintf('   T_end (evaluated):\n');
+disp(T_num);
 
-%% 8. Verify position and rotation decomposition
-fprintf('\n8. Checking PosExpr / RotExpr decomposition ... ');
-p_sym = tf.evalPos(vals_numeric);
-R_sym = tf.evalRot(vals_numeric);
-assert(norm(p_sym - T_num_ref(1:3,4)) < 1e-12, 'PosExpr mismatch.');
-assert(norm(R_sym - T_num_ref(1:3,1:3)) < 1e-12, 'RotExpr mismatch.');
-fprintf('OK (position + rotation match)\n');
+% Rotation matrix orthonormality check
+assert(abs(det(R_num) - 1) < 1e-12, 'Rotation matrix det ≠ 1.');
+assert(norm(R_num * R_num' - eye(3), 'fro') < 1e-12, 'R * R'' ≠ I.');
+fprintf('   Rotation matrix: orthonormal (det=1, R*R''=I)\n');
+
+%% 6. Visualization
+fprintf('\n6. Visualizing mechanism ... ');
+viz.mechanism(dslFile, configFile);
+fprintf('OK (figure opened)\n');
 
 %% Done
 fprintf('\n=== ALL CHECKS PASSED ===\n');

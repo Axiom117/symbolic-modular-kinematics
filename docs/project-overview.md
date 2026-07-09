@@ -111,7 +111,7 @@
 
   此范式将机构视为从效应器（end-effector）倒推回驱动源的有向图，而非从基座正向生长的串联链——更贴合工具优先的模块化设计思维。
 - **L3 执行层（Execution）**：把机构本体接入世界系与驱动源，闭合成自洽、可求解的系统。它定义「机构如何被固定、如何被驱动、闭环判据是什么」。
-  - **世界系闭环（M-REx 主构型，主导模式）**：当前绝大多数模块化 M-REx 配置采用此模式。机构本体在 DSL 中描述为**开环链**（不写 `closed: true`），挂载到多台外部驱动器（`Manipulator` 模块）上。每台 `Manipulator` 的 `ground` frame 在 L3 绑定到同一 `world` 原点，形成回路 `世界原点 → 驱动 #1 → 机构本体 → 驱动 #2 → 世界原点`。**闭合不发生在模块端口之间，而发生在世界原点**——因为两条独立树共享同一 `world` 根。闭合判据为 L3 `closure_cuts` 声明的切口处相对位姿残差。外部驱动器由 `Manipulator` 关节模块物化（内部三个 `prismatic` 组合成 3-DOF 笛卡尔驱动，机构侧以 `socket` 对接，世界侧以 `ground` frame 由 L3 绑定到 `world`）。
+  - **世界系闭环（M-REx 主构型，主导模式）**：当前绝大多数模块化 M-REx 配置采用此模式。机构本体在 DSL 中描述为**开环链**（不写 `closed: true`），挂载到多台外部驱动器（`Manipulator` 模块）上。在 Tool-Rooted Growth 范式下，末端效应器任务系（如 `ToolPipette.tip_origin`，标记 `semantic_tag: root`）在零位构型下与世界原点重合（$T = I_4$）。FK 从工具端向外传播，到达每台 `Manipulator` 的 `ground` frame 时自然产生一个由机构几何决定的静态偏移位姿。L3 执行层将此偏移记录为 `world_binding` 的标定变换，每条 `Manipulator` 的 `ground` frame 均通过各自的静态标定偏移绑定到同一 `world` 参考系。**闭合不发生在模块端口之间，而发生在世界参考系**——所有 ground frame 共享同一 `world` 参考系，两条传播路径到达机构本体同一点时位姿应一致。闭合判据为 L3 `closure_cuts` 声明的切口处相对位姿残差。外部驱动器由 `Manipulator` 关节模块物化（内部三个 `prismatic` 组合成 3-DOF 笛卡尔驱动，机构侧以 `socket` 对接，世界侧以 `ground` frame 由 L3 绑定到 `world`）。
   - **L2 内部闭环（四杆环等，辅助验证模式）**：机构本体在 DSL 中即含 `closed: true` 标记，回路在模块端口之间闭合。主要用于验证 A.4 的回路识别与约束构造逻辑，不是实际 M-REx 部署的目标构型。
   - **开环驱动（测试构型）**：若关节自身可驱动（`actuated`），则无需外部驱动器，直接驱动关节即可形成开环串联构型（如 3R 链），解释器直接输出从世界系到末端的正运动学表达式。
 
@@ -234,9 +234,8 @@ DSL 定位为 L2 纯拓扑——只描述机构本体由哪些模块实例组成
 
 | 示例文件 | 结构 | 验证目标 |
 |------|------|------|
-| `specs/dsl/examples/open-chain-2r/robot_description.yaml` | 两段串联转动副 + 工具末端 | 变换传播、端口拼接、FK 输出 |
-| `specs/dsl/examples/single-closed-loop/robot_description.yaml` | 4 杆单闭环或 Manipulator–机构–Manipulator 闭环 | 闭环约束提取、未知量识别 |
-| `specs/dsl/examples/parallel-prototype/robot_description.yaml` | 三支链并联（类比 MRF 2.4 构型） | 多支链 FK 传播、多切口约束构造 |
+| `specs/dsl/examples/open-chain-2r/robot_description.yaml` | 两段串联转动副 | 变换传播、端口拼接、FK 输出 |
+| `specs/dsl/examples/single-closed-loop/robot_description.yaml` | 平行四边形单闭环 | 闭环约束提取、未知量识别 |
 
 每个示例必须附带：
 - 拓扑图（Mermaid 或 ASCII art，可放在示例文件头部注释中）
@@ -262,7 +261,7 @@ DSL 定位为 L2 纯拓扑——只描述机构本体由哪些模块实例组成
 - 编写 `visualize_mechanism.m`：读入一份 DSL 机构描述文件（如 `specs/dsl/examples/open-chain-2r/robot_description.yaml`），解析其中的实例声明、端口连接和参数赋值。
 - 对每个实例，加载对应模块 YAML 定义（复用 A.1 的模块库），按实例参数注入数值，构建模块自身的 frame graph，并为所有内部 frame/body 名加实例名前缀以避免跨实例命名冲突。
 - 按 DSL 连接声明，在实例之间插入 mate 变换边（`Rx(π) · Rz(roll)`，与 `modeling-conventions.md` §10.2 一致），将分散的模块 frame graph 拼合成一张全局机构图。
-- 处理 `world` 绑定：将 DSL 中声明为 `ground` 语义标签的 frame 通过标定偏移挂载到 `world` 根节点。
+- 处理 `world` 绑定：FK 传播的 root node 为 `semantic_tag: root` 标记的 frame（如 `tip_origin`），其位姿种子为 $I_4$（即末端效应器与世界原点重合）。从 root 向外传播后，每个 `semantic_tag: ground` 的 frame 得到一个由机构几何决定的位姿——该位姿即为其相对 `world` 的静态标定偏移，记录在 `world_binding` 中。
 - 调用共享 FK 传播与渲染管线，计算所有 body 中心坐标系和 port 坐标系的全局位姿并出图。
 - 可视化输出：
   - 每个 body 的 STEP 几何（若有）或简化包围盒。
@@ -273,9 +272,10 @@ DSL 定位为 L2 纯拓扑——只描述机构本体由哪些模块实例组成
 - 输出每个实例的 frame 全局位姿报告，供与手工推导的变换链做数值对比验证。
 
 **M-REx 世界系闭环的可视化**：对于 L3 世界系闭环构型（当前主导模式），DSL 中机构本体是开环链、
-没有 `closed: true` 边。可视化时两个 `Manipulator.ground` frame 重合在 `world` 原点即表示
-「回路闭合」；机构本体作为开环链挂在两者之间。若 Manipulator 关节值不满足闭环约束，表现为
-机构本体两端位姿不连续。详细行为见 `specs/dsl/connection-semantics.md` §6.4。
+没有 `closed: true` 边。可视化时末端效应器（`tip_origin`）位于世界原点（$T = I_4$），
+各 `Manipulator.ground` frame 位于各自的静态标定偏移位置——机构本体作为开环链挂在两者之间。
+若 Manipulator 关节值满足闭环约束，机构本体两端位姿连续（无错位）；若不满足，两端出现
+位姿不连续。详细行为见 `specs/dsl/connection-semantics.md` §6.4。
 
 产出：
 
@@ -342,7 +342,7 @@ flowchart LR
 |------|------|
 | `+ir/Expander.m` | IR 展开器：DSL + 模块库 + 参数配置 → EdgeGraph（IR 图） |
 
-过关标准：`viz.mechanism` 调用三个 DSL 示例（open-chain-2r / single-closed-loop / parallel-prototype）的运行结果（图形输出、frame 位姿报告、mate gap）与重构前完全一致。
+过关标准：`viz.mechanism` 调用两个 DSL 示例（open-chain-2r / single-closed-loop）的运行结果（图形输出、frame 位姿报告、mate gap）与重构前完全一致。
 
 ---
 
@@ -403,7 +403,7 @@ flowchart LR
   - `task`：任务 frame（如 `tip_origin`，FK 输出候选 / IK 目标候选）
 - 创建 `specs/schema/execution-config.schema.yaml`，定义 L3 配置结构：
   - `mode`: `open_loop` | `closed_loop`
-  - `world_binding`：哪些 `ground` frame 绑定到 world（含静态标定偏移）
+  - `world_binding`：声明每个 `ground` frame 到 `world` 的静态标定变换。该变换由解释器在零位构型下从 root frame（末端效应器，$T=I_4$）沿机构传播自动计算，而非手工指定。它确保末端效应器在零位时与世界原点重合，同时各 Manipulator 关节处于其零位（dx=dy=dz=0）
   - `endFrame`：FK 输出的目标坐标系引用
   - `actuated_joints`：驱动关节列表（开环模式）
   - `known` / `unknown`：变量分区（决定 FK 还是 IK 方向）
@@ -457,10 +457,10 @@ flowchart LR
 - 对同一条开环链，替换不同模块参数后仍能稳定生成新表达式，无需改解释器逻辑
 - IR 展开后无孤立节点、无悬空引用
 - `ir-graph.schema.yaml` 校验通过
-- 三个 DSL 示例（open-chain-2r、single-closed-loop、parallel-prototype）的 IR 展开均通过结构校验
+- 两个 DSL 示例（open-chain-2r、single-closed-loop）的 IR 展开均通过结构校验
 - 符号 FK 表达式数值求值结果与 `viz.mechanism` 数值 FK 输出一致（误差 < 1e-12）
 
-> **闭环说明**：single-closed-loop 和 parallel-prototype 含 `closed: true` 边，其符号 FK 仅沿生成树传播（弦边不参与），因此末端位姿表达式是「开环近似」，不代表闭环约束下的真实位姿。闭环约束构造由 A.4 承接。A.3 只需保证闭环机构的 IR 图展开正确、生成树 FK 可计算。
+> **闭环说明**：single-closed-loop 含 `closed: true` 边，其符号 FK 仅沿生成树传播（弦边不参与），因此末端位姿表达式是「开环近似」，不代表闭环约束下的真实位姿。闭环约束构造由 A.4 承接。A.3 只需保证闭环机构的 IR 图展开正确、生成树 FK 可计算。
 
 ---
 
@@ -484,7 +484,7 @@ flowchart LR
 #### A.4.1 回路识别与切开
 
 - **L2 内部闭环**：在 IR 图中识别回路——从 `world` 出发做 DFS 生成树，DSL 中 `closed: true` 的连接即为补边（chord）。在补边连接的 `frame` 对处切割，将闭环暂时转成一棵可遍历的树。
-- **L3 世界系闭环**：DSL 中无 `closed: true`，机构本体为开环树。L3 execution-config 的 `closure_cuts` 显式声明切口位置。两条独立树（`world → Manipulator1 → 机构` 和 `world → Manipulator2 → 机构`）共享同一 `world` 根——回路因两个 `ground` frame 绑定到同一 `world` 原点而形成。
+- **L3 世界系闭环**：DSL 中无 `closed: true`，机构本体为开环树。L3 execution-config 的 `closure_cuts` 显式声明切口位置。两条独立树（`world → Manipulator1 → 机构` 和 `world → Manipulator2 → 机构`）共享同一 `world` 参考系——回路因所有 `ground` frame 均通过各自的静态标定偏移绑定到 `world` 而形成。闭合判据为两条支路到达机构本体同一点（如机构链两端）的位姿应一致。
 - 切开处生成 `constraint` 节点：记录切口两侧坐标系对 `(F_near, F_far)`（见 §3.5）
 
 #### A.4.2 闭环约束构造
@@ -500,7 +500,7 @@ flowchart LR
 复用 `specs/schema/execution-config.schema.yaml`，闭环构型额外声明：
 
 - `mode: closed_loop`
-- `world_binding`：同开环
+- `world_binding`：同开环。闭环构型下每个 `ground` frame 的静态标定偏移同样由零位构型 FK 预计算（末端效应器 $T=I_4$ 与世界原点重合），确保 Manipulator 关节零位与机构零位重合
 - `external_drivers`：哪些 `Manipulator` 实例的关节变量是闭环未知量
 - `closure_cuts`：切口位置声明 `{near: <instance>.<frame>, far: <instance>.<frame>}`
 - `constrained_components`：每切口须归零的位姿分量子集（`[tx, ty, tz, rx, ry, rz]` 的子集）
@@ -547,9 +547,7 @@ flowchart LR
 4. **L2 内部闭环机构**（四杆环）：验证回路识别和约束构造——验证 `closed: true` 标记的
    切口生成与残差公式，为 L3 世界系闭环打基础。
 5. 三支链并联雏形（L2 闭环）：验证多支链 FK 传播与多切口约束构造。
-6. **M-REx 世界系闭环**（L3 闭环，主导目标）：机构本体为开环链，两台 `Manipulator`
-   的 `ground` 绑定到同一 `world` 原点。验证 L3 `closure_cuts` 切口生成、外部驱动
-   变量指派、以及两树合并约束构造。这是 PathPlanner 集成验证的前置步骤。
+6. **M-REx 世界系闭环**（L3 闭环，主导目标）：机构本体为开环链，末端效应器在零位与世界原点重合（$T=I_4$），两台 `Manipulator` 的 `ground` frame 通过各自的静态标定偏移绑定到同一 `world` 参考系。验证 L3 `closure_cuts` 切口生成、外部驱动变量指派、以及两树合并约束构造。这是 PathPlanner 集成验证的前置步骤。
 
 每个样例都应至少输出：
 
@@ -609,7 +607,7 @@ flowchart LR
 
 **具体任务**：
 
-1. **机构 DSL 建模**：用 DSL 描述 PathPlanner 的 2R 平面闭链机构（Link A–B–C + 两台 MicroSupport + 末端执行器）。`Manipulator` 模块直接对应两台 3-DOF 微操作器（`MC1`、`MC2`）；`Joint` 模块对应被动转动关节 A–B、B–C。**注意：这是一个 L3 世界系闭环——机构本体（Link A–B–C）在 DSL 中是开环链，不写 `closed: true`。闭合发生在两台 Manipulator 的 `ground` frame 绑定到同一 `world` 原点时。**
+1. **机构 DSL 建模**：用 DSL 描述 PathPlanner 的 2R 平面闭链机构（Link A–B–C + 两台 MicroSupport + 末端执行器）。`Manipulator` 模块直接对应两台 3-DOF 微操作器（`MC1`、`MC2`）；`Joint` 模块对应被动转动关节 A–B、B–C。**注意：这是一个 L3 世界系闭环——机构本体（Link A–B–C）在 DSL 中是开环链，不写 `closed: true`。闭合由 L3 执行层实现：末端效应器在零位与世界原点重合（$T = I_4$），两台 Manipulator 的 `ground` frame 各带静态标定偏移绑定到 `world`。回路因两条支路共享同一 `world` 参考系而形成。**
 
 2. **参数映射**：将 `robot_params.m` 中的几何参数（`CubeLength`、`TipDistance`、`TiltAngle`）映射为 DSL 实例参数；将 `sim_params.m` 中的初值与边界映射为求解配置。
 

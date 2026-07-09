@@ -19,27 +19,18 @@ DSL 是**机构结构说明书**：用文本描述一台具体机构由哪些模
 
 ### 1.2 DSL 不是什么
 
-DSL **不涉及求解，也不描述执行语义**。以下内容一律**不出现**在 DSL 中，全部归 **L3 执行配置**
-（后续 A.3 定义 `execution-config.schema.yaml`）：
+DSL **不涉及求解，也不描述执行语义**。以下内容一律归 **L3 执行配置**：
 
-| 不在 DSL 中 | 归属 | 原因 |
-|------|------|------|
-| `world` 根与接地绑定 | L3 `world_binding` | 同一机构本体可接不同世界固定方式 |
-| `endFrame`（FK/IK 输出目标） | L3 分区中的 `known`/`unknown` | 求解方向由变量分区决定，非拓扑属性 |
-| `actuated`（驱动指派） | L3 `actuated_joints` | 同一关节可为驱动或被动，取决于构型 |
-| `known` / `unknown` 变量分区 | L3 partition | 决定 FK 还是 IK，与拓扑无关 |
-| 标定偏移、求解边界、初值、收敛阈值 | L3 execution-config | 求解配置，非机构本体 |
-| 闭环回路的切口分量选择（`constrained_components`） | L3 `closure_cuts` | 由 DOF 分析决定 |
+| 不在 DSL 中 | 归属 |
+|------|------|
+| `world` 根与接地绑定 | L3 `world_binding` |
+| `endFrame`（FK/IK 输出目标） | L3 变量分区 |
+| `actuated`（驱动指派） | L3 `actuated_joints` |
+| `known` / `unknown` 变量分区 | L3 partition |
+| 标定偏移、求解边界、初值、收敛阈值 | L3 execution-config |
+| 闭环回路的切口分量选择 | L3 `closure_cuts` |
 
-> **设计依据**：同一套机构本体（L2）可接入不同执行层（L3）——闭环执行得到 IK 残差，
-> 开环执行得到 FK 表达式（`modeling-conventions.md` §2.4）。若把执行语义写进 DSL，就破坏了这一复用性。
-> 因此 DSL 严格保持为**纯拓扑**：只有实例与连接。
-
-### 1.3 DSL 只做三件事
-
-1. 声明机构由哪些**模块实例**组成（`instances`）。
-2. 声明实例之间如何按**端口连接**（`connections`）。
-3. 标记哪些连接是**闭环补边**（连接级 `closed`），供 A.4 识别切口位置。
+> 设计依据：同一套机构本体（L2）可接入不同执行层（L3）——闭环执行得 IK 残差，开环执行得 FK 表达式（`modeling-conventions.md` §2.4）。把执行语义写进 DSL 会破坏复用性。因此 DSL 严格保持为**纯拓扑**：只有实例与连接。
 
 ---
 
@@ -188,46 +179,47 @@ connections:
 - 合法取值 `0 .. symmetry-1`（`symmetry` 由端口定义给出，缺省 4）。
 - 缺省 0。
 - 只表达**离散装配朝向**；运行时连续绕法向转动须改用 revolute `Joint` 模块（§5.6）。
+- **传播性**：`roll` 会永久旋转下游所有模块的朝向。若仅需旋转 Joint 模块的关节轴方向而不影响下游，
+  必须在 Joint 两端**成对使用 `roll`**（`roll: 1` / `roll: -1`）。详见 `connection-semantics.md` §3.5。
 
 ### 5.5 closed 字段
 
-- `closed: true` 标记该连接是**闭环补边（chord）**：它在机构图中闭合了一个回路。
-- 缺省 `false`（树边）。
-- 语义：解释器在 A.4 会在此连接处切开回路、生成 `Constraint`（切口相对位姿残差）。
-  切口须归零的具体分量由 L3 与 DOF 分析决定，**不在 DSL 中声明**（§1.2）。
-- 只标记**在 L2 机构图内部即闭合**的回路。若回路仅在 L3 绑定 `world`/外部驱动后才闭合
-  （如 Manipulator–机构–Manipulator 经世界系闭合），则不写 `closed`——那属于 L3 `closure_cuts`（§5.7）。
+- `closed: true` 标记闭环补边（chord），缺省 `false`（树边）。
+- 语义与 L2/L3 闭环归属详见 `connection-semantics.md` §6。
 
-### 5.6 连接不能做的事
+### 5.6 连接限制
 
-连接的唯一含义是「两端口面对面对插贴合」（`modeling-conventions.md` §10）。以下场合**不得**靠连接实现，
-必须在两端口间**插入模块**：
+连接的唯一含义是「两端口面对面对插贴合」（`modeling-conventions.md` §10）。以下需求**必须插入模块**：
 
-| 需求 | 错误做法 | 正确做法 |
-|------|------|------|
-| 坐标适配（额外平移/旋转） | 给连接加任意变换 | 插入 `Adaptor` 模块，两侧各连一次 |
-| 运行时连续绕法向转动 | 用 `roll` 表达 | 插入 revolute `Joint` 模块，轴取公共法向 |
+| 需求 | 正确做法 |
+|------|------|
+| 坐标适配（额外平移/旋转） | 插入 `Adaptor` 模块 |
+| 运行时连续绕法向转动 | 插入 revolute `Joint` 模块 |
 
 ### 5.7 闭环归属：L2 vs L3
 
-| 回路类型 | 何时闭合 | 声明位置 | 主要用途 |
-|------|------|------|------|
-| L2 机构内闭环 | 模块实例按连接成环（如四杆环） | DSL 连接级 `closed: true` | 验证回路识别与约束构造逻辑 |
-| L3 世界系闭环 | L3 绑定 `world` 与外部驱动后才成环（M-REx 主构型） | L3 execution-config `closure_cuts` | **当前主导部署模式** |
+详见 `connection-semantics.md` §6.4。简表：
 
-**M-REx 世界系闭环**是绝大多数模块化 M-REx 配置采用的真实模式。机构本体在 DSL 中描述为开环链
-（不写任何 `closed: true`），挂载到多台 `Manipulator` 上。每台 `Manipulator` 的 `ground` frame
-在 L3 绑定到同一 `world` 原点，回路因此闭合。详细语义见 `connection-semantics.md` §6.4。
+| 回路类型 | 声明位置 |
+|------|------|
+| L2 机构内闭环（四杆环等） | DSL `closed: true` |
+| L3 世界系闭环（M-REx 主构型） | L3 execution-config `closure_cuts` |
 
 ### 5.8 连接声明示例
 
 ```yaml
 connections:
-  - ports: [frame0.faceXPlus, joint1.linkA]           # 顺序无关；frame0 socket 为父
+  # 基本连接（无 roll，缺省朝向）
+  - ports: [frame0.faceXPlus, joint1.linkA]
   - ports: [joint1.linkB, frame1.faceXMinus]
-    roll: 1                                          # 装配时绕法向转 90°（symmetry=4）
-  - ports: [jointDA.linkB, frameA.faceXMinus]
-    closed: true                                     # 闭环补边，A.4 在此切开
+  # Joint 两端 roll 配对：旋转关节轴，下游朝向不变（§5.4 配对规则）
+  - ports: [frame1.faceZPlus, joint2.linkA]
+    roll: 1
+  - ports: [joint2.linkB, frame2.faceZMinus]
+    roll: -1
+  # 闭环补边
+  - ports: [joint_C.linkB, frame_A.faceZPlus]
+    closed: true
 ```
 
 ---
@@ -258,24 +250,8 @@ connections:
 
 ## 7. 唯一性与过关标准
 
-- **写法唯一性**：同一机构结构不存在两种等价但语法不同的合法写法。连接顺序无关不破坏唯一性——
-  一条连接由其无序端口对唯一标识，重复声明同一端口对为非法（端口单次占用）。
+- **写法唯一性**：同一机构结构不存在两种等价但语法不同的合法写法。一条连接由其无序端口对唯一标识，重复声明同一端口对为非法（端口单次占用）。
 - **可校验性**：`mechanism-assembly.schema.yaml` 对非法连接、重复占用端口、悬空端口、缺失字段能明确报错。
-- **示例过关**：`examples/` 下三个示例（`open-chain-2r`、`single-closed-loop`、`parallel-prototype`）
-  均通过 Schema 校验，且手工推导的变换链与 DSL 语义一致（详见各示例头部注释与 A.2.3）。
+- **案例过关**：`cases/` 下案例均通过 Schema 校验。
 
----
-
-## 8. 实现者须知（面向 A.2.5 可视化与 A.3 解释器）
-
-供 `viz.mechanism`（A.2.5）与解释器（A.3）读取 DSL 时参考：
-
-- 实例名将作为**命名空间前缀**加在模块内部所有 `body`/`frame`/`joint` 名前，避免跨实例命名冲突
-  （如 `frame0.faceXPlus`、`joint1.q`）。
-- 连接在 IR 中展开为一条桥接边，施加 mate 变换 `Rz(roll·360/sym)·Rx(π)`
-  （`connection-semantics.md` §2；`modeling-conventions.md` §10.2）。
-- `observable: true` 的 frame/joint（在模块定义中标记）会以实例限定名进入变量注册表，
-  供 L3 分区——DSL 层不接触该分区。
-- DSL 提供的字段（实例名、`type`、`ports`、`roll`、`closed`）足以让可视化脚本加载各模块定义、
-  注入参数、构建全局 frame graph 并出图。参数值由 `specs/modules/config/dimensions.yaml` 按
-  `module_type` 注入，关节变量由 per-example `joint_config.yaml` 按实例名覆盖。
+> 实现细节（DSL→IR 展开、命名空间前缀、mate 变换施加）见 `specs/ir/dsl-to-ir-mapping.md`。

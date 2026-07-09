@@ -85,7 +85,7 @@ function result = mechanism(dslYaml, configYaml)
         col = core.VizHelpers.typeColor(inst(i).type);
         fprintf('\n-- instance %s [%s] --\n', inst(i).name, inst(i).type);
 
-        % draw each body for this instance
+        % ---- pass 1: draw body geometry patches only (always visible) ----
         for k = 1:numel(inst(i).bodies)
             b = inst(i).bodies{k};
             % check if the body node has a computed pose; if not, mark it as unplaced
@@ -93,16 +93,25 @@ function result = mechanism(dslYaml, configYaml)
 
             % Tb: the 4x4 homogeneous transform of the body in world coordinates
             Tb = poses(b.node);
-            
+
             geomPath = core.PathUtils.resolveGeometryPath(b.geometry, libDir, repoRoot);
             if ~isempty(b.geometry) && ~isempty(geomPath)
                 geom = core.VizHelpers.importGeometry(geomPath);
-                if ~isempty(geom); core.VizHelpers.patchGeometry(ax, Tb, geom, col, 1); end
+                if ~isempty(geom); core.VizHelpers.patchGeometry(ax, Tb, geom, col, 0.8); end
             end
-            % draw the body frame triad and label
-            core.VizHelpers.triad(ax, Tb, L, 1.2, '-');
         end
 
+        % ---- snapshot children before drawing frame-related graphics ----
+        preKids = allchild(ax);
+
+        % ---- pass 2: draw body triads ----
+        for k = 1:numel(inst(i).bodies)
+            b = inst(i).bodies{k};
+            if ~isKey(poses, b.node); continue; end
+            core.VizHelpers.triad(ax, poses(b.node), L, 1.2, '-');
+        end
+
+        % ---- draw frames (triads + markers) ----
         for k = 1:numel(inst(i).frames)
             f = inst(i).frames{k};
             if ~isKey(poses, f.node)
@@ -125,7 +134,7 @@ function result = mechanism(dslYaml, configYaml)
                 mk, f.node, T(1,4), T(2,4), T(3,4), T(1,3), T(2,3), T(3,3));
         end
 
-        % joint axes
+        % ---- draw joint axes ----
         for k = 1:numel(inst(i).joints)
             j = inst(i).joints{k};
             if ~isKey(poses, j.node); continue; end
@@ -138,7 +147,23 @@ function result = mechanism(dslYaml, configYaml)
             core.VizHelpers.jointAxis(ax, poses(j.node), j.axis, L, j.kind, ...
                 sprintf('%s.%s=%.3g', inst(i).name, j.var, jVal));
         end
+
+        % ---- tag all frame-related children with this instance name ----
+        postKids = allchild(ax);
+        newKids = postKids(~ismember(postKids, preKids));
+        set(newKids, 'Tag', inst(i).name);
     end
+
+    % ---- dropdown menu: select which instance's frames to show ----
+    instNames = {inst.name};
+    menuStr = ['<全部显示>', instNames];  % first item: show all instances
+    fig.UserData = struct('ax', ax, 'instNames', {instNames}, 'nInst', nInst);
+    uicontrol('Style', 'popupmenu', ...
+        'String', menuStr, ...
+        'Value', 1, ...
+        'Position', [20 20 180 25], ...
+        'Callback', @(src, ~) toggleInstanceFrames(src, fig), ...
+        'Parent', fig);
 
     % --- mate diagnostics: segment between paired port origins ---
     fprintf('\n-- mate checks --\n');
@@ -169,6 +194,23 @@ function result = mechanism(dslYaml, configYaml)
     result.unplaced = unplaced;
 
     rotate3d(ax, 'on');
+end
+
+%% local functions
+
+function toggleInstanceFrames(src, fig)
+%TOGGLEINSTANCEFRAMES  Dropdown callback: show frames for selected instance only.
+%   idx=0 (first menu item) shows all; idx>0 shows only that instance's frames.
+    ud = fig.UserData;
+    idx = src.Value - 1;  % 0 = show all
+    for ii = 1:ud.nInst
+        h = findobj(ud.ax, 'Tag', ud.instNames{ii});
+        if idx == 0 || idx == ii
+            set(h, 'Visible', 'on');
+        else
+            set(h, 'Visible', 'off');
+        end
+    end
 end
 
 

@@ -26,30 +26,11 @@ $$T_{\text{plug} \leftarrow \text{socket}} = R_z\!\left(\text{roll} \cdot \tfrac
 
 ## 2. 标准 mate 变换（IR 实现）
 
-### 2.1 代码
+使用与 DSL 层相同的 mate 公式（`connection-semantics.md` §2）：
 
-```matlab
-% EdgeGraph.m L76-79 (addMate) / L93-96 (addClosedMate)
-rollAngle = roll * 2 * pi / symmetry;
-Tm = core.RigidBodyMath.T( ...
-    core.RigidBodyMath.rotz(rollAngle) * core.RigidBodyMath.rotx(pi), ...
-    [0; 0; 0]);
-```
+$$T_{\text{plug} \leftarrow \text{socket}} = R_z\!\left(\text{roll} \cdot \tfrac{2\pi}{\text{symmetry}}\right) \cdot R_x(\pi), \qquad t = 0$$
 
-### 2.2 矩阵形式
-
-$$T_m = \begin{bmatrix} R_z(\theta) \cdot R_x(\pi) & 0 \\ 0 & 1 \end{bmatrix}, \quad \theta = \text{roll} \cdot \frac{2\pi}{\text{symmetry}}$$
-
-### 2.3 分量分解
-
-- **`Rx(π)`**：绕端口 +X 翻转 180°
-  - `+Z → -Z`（法向反平行，面对面对插）
-  - `+Y → -Y`（翻转）
-  - `+X → +X`（不变）
-- **`Rz(θ)`**：绕公共对插法向的离散滚转
-  - θ 由 roll 索引和 symmetry 阶数确定
-  - 仅离散取值（连续转动须用 Joint 模块）
-- **平移 t = 0**：两对接面原点相触
+IR 层的唯一差异在**边的方向性**：`addMate` 双向插入（参与 FK），`addClosedMate` 单向插入（不参与 FK，toStruct 排除）。
 
 ---
 
@@ -196,31 +177,12 @@ s = obj.Edges(keepMask);
 
 ## 7. 诊断：mate gap 与 Zdot
 
-在可视化中，每条 mate 连接产生两条诊断值：
+| 指标 | 公式 | 理想值 |
+|------|------|--------|
+| **gap** | $\|\mathbf{p}_s - \mathbf{p}_p\|$ | $0$（对齐） |
+| **Zdot** | $\mathbf{z}_s \cdot \mathbf{z}_p$ | $-1$（反平行） |
 
-### 7.1 mate gap
-
-```matlab
-% mechanism.m (visualization section)
-gap = norm(Ps(1:3,4) - Pp(1:3,4));
-```
-
-socket 原点与 plug 原点之间的欧氏距离（mm）。对齐状态下 gap ≈ 0。
-
-### 7.2 Zdot
-
-```matlab
-zdot = dot(Ps(1:3,3), Pp(1:3,3));
-```
-
-socket 的 +Z 与 plug 的 +Z 的点积。面对面对插时两法向反平行，期望值 Zdot ≈ -1。
-
-### 7.3 诊断用途
-
-| 边类型 | 诊断含义 |
-|------|------|
-| `mate`（生成树） | gap ≈ 0, Zdot ≈ -1 表示连接正确对齐 |
-| `closed_mate`（弦边） | gap 和 Zdot 反映闭环残差——gap 非零表示回路未闭合 |
+生成树边 gap≈0, Zdot≈-1 表示正确对齐；弦边的 gap 和 Zdot 反映闭环残差。
 
 ---
 

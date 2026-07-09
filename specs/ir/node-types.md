@@ -98,12 +98,9 @@ Root node 在 FK 传播时以 $T = I_4$（世界原点）为初始位姿。
 
 > **标签语义分离**：`semantic_tag: root` 和 `semantic_tag: ground` 是两个不同的标签：
 > - `root`：标记 FK 传播起点，触发 `addRoot()` 自动注册。典型用途：`ToolPipette.tip_origin`
-> - `ground`：标记 L3 世界绑定端点（如 `Manipulator.ground`），用于执行层识别哪些 frame 绑定到世界原点。**不**触发自动 root 注册。
+> - `ground`：标记 L3 世界绑定端点（如 `Manipulator.ground`），用于执行层识别哪些 frame 通过静态标定偏移绑定到 `world` 参考系。**不**触发自动 root 注册。
 
-> **工具端生长范式（Tool-Rooted Growth）**
-> 模块化机构的自然装配方向是从工具端向外生长：先确定工具模块（如 `ToolPipette`）的参考系（`semantic_tag: root`），沿连接链向外逐步定位各模块，最终抵达 `Manipulator` 外部驱动端。
->
-> 若所有模块均无 `semantic_tag: root` frame，则 fallback 到第一个实例的第一个 body 作为 root（见 `dsl-to-ir-mapping.md` §7 Root Fallback）。支持多 root（多次调用 `addRoot()`），适用于多分支 / 并联机构。
+> **工具端生长范式（Tool-Rooted Growth）**：机构从工具模块（如 `ToolPipette`，标记 `semantic_tag: root`）的参考系开始，沿连接链向外生长，最终抵达 `Manipulator` 驱动端。`semantic_tag: ground`（如 `Manipulator.ground`）为独立标签，标识 L3 世界绑定端点，不触发 root 自动注册。无 root frame 时 fallback 到第一个实例的第一个 body。
 
 ---
 

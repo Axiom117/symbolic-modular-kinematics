@@ -1,22 +1,22 @@
-# 单闭环四杆机构可视化配置（阶段 A.2.5）
+# 平行四边形单闭环机构可视化配置（阶段 A.2.5）
 # Per-instance joint-variable overrides for viz/mechanism.m.
 #
 # 结构：实例名 → 关节变量取值映射。
-#   顶层键 = DSL instances 中的实例名（如 jointAB）。
+#   顶层键 = DSL instances 中的实例名（如 joint_AB）。
 #   二层键 = 该实例模块内关节的 variable 名（revolute→q，prismatic→dx/dy/dz）。
 #
 # 未列出的关节变量默认取 0（零位）。几何参数（cubeLength、tipDistance 等）
 # 不在此文件中，仍由 <module_library>/config/dimensions.yaml 按 module_type 提供。
 #
-# 默认全零（零位=四杆展平呈直线，回路最大张开）。
+# 默认全零（零位=平行四边形展平呈直线，回路最大张开）。
 # 补边（closed）端口在零位并不重合——mate 报告会显示该 chord 的闭环残差
-# （直线构型下约 80mm），正是 A.4 需要求解归零的约束量；树边残差恒为 0。
+# （直线构型下约 160mm），正是 A.4 需要求解归零的约束量；树边残差恒为 0。
 
-jointAB:
+joint_AB:
   q: 0
-jointBC:
+joint_BD:
   q: 0
-jointCD:
+joint_CD:
   q: 0
-jointDA:
+joint_AC:
   q: 0

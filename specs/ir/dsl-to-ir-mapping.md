@@ -361,63 +361,30 @@ obj.Poses = obj.EdgeGraph_.propagate();
 
 ---
 
-## 9. 完整数据流
+## 9. 数据流示例
 
-```mermaid
-flowchart TD
-    subgraph dsl["DSL YAML"]
-        DSL1["mechanism: open_chain_2r"]
-        DSL2["instances: frame0: Frame, joint1: Joint"]
-        DSL3["connections: frame0.faceXPlus ↔ joint1.linkA"]
-    end
-    dsl --> cfg["参数配置"]
-    subgraph cfg["参数配置"]
-        CFG1["dimensions.yaml → Frame: {cubeLength: 10}"]
-        CFG2["joint_config.yaml → joint1: {q: 0.5236}"]
-    end
-    cfg --> expand["实例展开 (localExpandInstance × 2)"]
-    subgraph expand["实例展开"]
-        E1["frame0 [Frame]: body + frames +<br/>body→faceXPlus (fixed, T=...)"]
-        E2["joint1 [Joint]: bodyA/B + linkA/B +<br/>hingeA→hingeB (joint) + fixed"]
-    end
-    expand --> connect["连接处理"]
-    subgraph connect["连接处理"]
-        C1["frame0.faceXPlus (socket) ↔ joint1.linkA (plug)"]
-        C2["addMate('frame0.faceXPlus', 'joint1.linkA', 0, 4)"]
-        C3["mate 边 (双向, kind='mate')"]
-    end
-    connect --> ir["IR 图 (EdgeGraph)"]
-    subgraph ir["IR 图"]
-        IR1["RootNodes: {frame0.body} (fallback)"]
-        IR2["Edges: [fixed×N, joint×M, mate×2]"]
-    end
-    ir --> fk["FK 传播<br/>EdgeGraph.propagate → PosePropagator.propagatePoses"]
-    subgraph fk["FK 传播"]
-        FK1["Poses('frame0.body') = eye(4)"]
-        FK2["Poses('frame0.faceXPlus') = eye(4) * T_fixed"]
-        FK3["Poses('joint1.linkA') = Poses('frame0.faceXPlus') * T_mate"]
-        FK4["..."]
-    end
+以 `open-chain-2r` 为例的完整数据流见 §1 管线图。本节省略重复的 Mermaid 图，仅给关键步骤摘要：
+
+```
+DSL YAML → 参数配置(dimensions + joint_config) → 实例展开 ×N → 连接处理(mate/closed_mate) → IR 图 → FK 传播 → Poses map
 ```
 
 ---
 
 ## 代码对照表
 
-| 规范条目 | 代码位置 |
+| 步骤 | Expander.m 行号 |
 |------|------|
-| DSL 加载与校验 | `Expander.m` L52-64 |
-| 模块库路径解析 | `Expander.m` L66-72 |
-| `dimensions.yaml` 加载 | `Expander.m` L75-78 |
-| `joint_config.yaml` 加载 | `Expander.m` L81-85 |
-| 参数合并（dimCfg + jointCfg） | `Expander.m` L178-189 |
-| 实例展开循环 | `Expander.m` L94-101 |
-| 模块定义加载 + 缓存 | `Expander.m` L166-175 |
-| Body 展开 | `Expander.m` L196-201 |
-| Frame 展开 | `Expander.m` L204-217 |
-| Root 自动注册 | `Expander.m` L299-305 (`semantic_tag == 'root'`) |
-| FixedTransform 展开 | `Expander.m` L220-226 |
-| Joint 展开 | `Expander.m` L229-245 |
+| DSL 加载与校验 | L52-64 |
+| 模块库路径 + dimensions 加载 | L66-78 |
+| joint_config 加载 | L81-85 |
+| 参数合并 | L178-189 |
+| 实例展开循环 | L94-101 |
+| 模块定义加载 + 缓存 | L166-175 |
+| Body / Frame / FixedTransform / Joint 展开 | L196-245 |
+| Root 自动注册 | L299-305 |
+| 连接处理（极性校验 + mate/closed_mate） | L121-144 |
+| FK 传播 | L154 |
 | 端口引用解析 | `Expander.m` L254-259 |
 | Frame 查找 | `Expander.m` L262-273 |
 | 极性校验 | `Expander.m` L121-133 |

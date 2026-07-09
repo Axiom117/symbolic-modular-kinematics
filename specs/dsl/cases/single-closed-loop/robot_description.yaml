@@ -1,0 +1,89 @@
+# yaml-language-server: $schema=../../schema/mechanism-assembly.schema.yaml
+# 平行四边形单闭环机构 — 详细文档见同目录 README.md
+
+dsl_version: 0
+mechanism: single_closed_loop
+description: 平行四边形单闭环机构（4 杆 + 4 Joint 成环），用于验证回路识别与约束构造。
+module_library: ../../../modules/
+
+instances:
+# 4 个杆件 Link A/B/C/D，均为 Frame 模块，其中 Link A/D 位于上下，各由三个Frame模块串联而成；Link B/C 位于左右，各由两个Frame模块串联而成。
+  frame_link_A1:
+    type: Frame
+  frame_link_A2:
+    type: Frame
+  frame_link_A3:
+    type: Frame
+  frame_link_B1:
+    type: Frame
+  frame_link_B2:
+    type: Frame
+  frame_link_C1:
+    type: Frame
+  frame_link_C2:
+    type: Frame
+  frame_link_D1:
+    type: Frame
+  frame_link_D2:
+    type: Frame
+  frame_link_D3:
+    type: Frame
+  # 构成Link A/B/C/D的Pin模块。
+  pin_link_A_12:
+    type: Pin
+  pin_link_A_23:
+    type: Pin
+  pin_link_B_12:
+    type: Pin
+  pin_link_C_12:
+    type: Pin
+  pin_link_D_12:
+    type: Pin
+  pin_link_D_23:
+    type: Pin
+  # 4 个转动副 Joint AB/BC/CD/DA，均为 Joint 模块。
+  joint_AB:
+    type: Joint
+  joint_AC:
+    type: Joint
+  joint_BD:
+    type: Joint
+  joint_CD:
+    type: Joint
+
+connections:
+  # Link A 串联：A1 → A2 → A3
+  - ports: [frame_link_A1.faceYPlus, pin_link_A_12.sideA]
+  - ports: [pin_link_A_12.sideB, frame_link_A2.faceYMinus]
+  - ports: [frame_link_A2.faceYPlus, pin_link_A_23.sideA]
+  - ports: [pin_link_A_23.sideB, frame_link_A3.faceYMinus]
+  # Link B 串联：B1 → B2
+  - ports: [frame_link_B1.faceZPlus, pin_link_B_12.sideA]
+  - ports: [pin_link_B_12.sideB, frame_link_B2.faceZMinus]
+  # Link C 串联：C1 → C2
+  - ports: [frame_link_C1.faceZPlus, pin_link_C_12.sideA]
+  - ports: [pin_link_C_12.sideB, frame_link_C2.faceZMinus]
+  # Link D 串联：D1 → D2 → D3
+  - ports: [frame_link_D1.faceYPlus, pin_link_D_12.sideA]
+  - ports: [pin_link_D_12.sideB, frame_link_D2.faceYMinus]
+  - ports: [frame_link_D2.faceYPlus, pin_link_D_23.sideA]
+  - ports: [pin_link_D_23.sideB, frame_link_D3.faceYMinus]
+  # Serial 树边：Link A → B → D → C 依次通过 Joint 串联
+  - ports: [frame_link_A1.faceZPlus, joint_AB.linkA]
+    roll: 1
+  - ports: [joint_AB.linkB, frame_link_B1.faceZMinus]
+    roll: -1
+  - ports: [frame_link_B2.faceZPlus, joint_BD.linkA]
+    roll: 1
+  - ports: [joint_BD.linkB, frame_link_D1.faceZMinus]
+    roll: -1
+  - ports: [frame_link_D3.faceZMinus, joint_CD.linkA]
+    roll: 1
+  - ports: [joint_CD.linkB, frame_link_C2.faceZPlus]
+    roll: -1
+  # 补边（chord）：jointAC 回接 frameA，闭合回路 → A.4 在此切开生成 constraint
+  - ports: [joint_AC.linkA, frame_link_C1.faceZMinus]
+    roll: 1
+  - ports: [joint_AC.linkB, frame_link_A3.faceZPlus]
+    roll: -1
+    closed: true

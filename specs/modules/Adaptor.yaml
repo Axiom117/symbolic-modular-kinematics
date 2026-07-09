@@ -26,13 +26,18 @@ bodies:
 # --- 端口框架表（attachment_point 为和外部驱动器连接的点位，pin_connector 为与 M-REx Unit连接点位）---
 frames:
   - { name: attachment_point, host: body, exposed: true, semantic_tag: connector, polarity: plug }
-  - { name: pin_connector, host: body, exposed: true, semantic_tag: dock, polarity: plug }
+  - { name: pin_connector_A, host: body, exposed: true, semantic_tag: dock, polarity: plug }
+  - { name: pin_connector_B, host: body, exposed: true, semantic_tag: dock, polarity: plug }
 
 # --- 内部运动学图 · 固定变换 ---
 fixed_transforms:
   - from_frame: body
-    to_frame: pin_connector
+    to_frame: pin_connector_A
     translation: [3.5355, 5, 3.5355] # sqrt(50)/2
+    rotation: { axis_angle: { omega: [0, 1, 0], q: 0.7854 } }
+  - from_frame: body
+    to_frame: pin_connector_B
+    translation: [3.5355, -5, 3.5355] # sqrt(50)/2
     rotation: { axis_angle: { omega: [0, 1, 0], q: 0.7854 } }
   - from_frame: body
     to_frame: attachment_point

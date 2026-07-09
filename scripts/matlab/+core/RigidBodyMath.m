@@ -9,14 +9,14 @@ classdef RigidBodyMath
     methods (Static)
 
         %% construct a 4x4 homogeneous transformation matrix from rotation and translation
-        function T = T(R, t)
-            if isa(R, 'sym') || isa(t, 'sym')
+        function T = T(R, tr)
+            if isa(R, 'sym') || isa(tr, 'sym')
                 T = sym(eye(4));
             else
                 T = eye(4);
             end
             T(1:3,1:3) = R;
-            T(1:3,4) = t(:);
+            T(1:3,4) = tr(:);
         end
 
         %% elementary rotation about the X axis
