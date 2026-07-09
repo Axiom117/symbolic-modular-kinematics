@@ -3,7 +3,7 @@ classdef KinematicModel < handle
 %   Queries a symbolically-expanded EdgeGraph (built by ir.Expander in the
 %   pure symbolic pipeline, A.4.0) for a named end frame, decomposes the
 %   4×4 homogeneous pose into position and rotation symbolic expressions,
-%   provides eval() for fast numeric evaluation, and formulateProblem() to
+%   provides eval() for fast numeric evaluation, and formulatePoseProblem() to
 %   construct FK/IK solving problems from L3 execution config.
 %
 %   KINEMATICMODEL is not a solver — it stores the symbolic forward kinematics
@@ -23,7 +23,7 @@ classdef KinematicModel < handle
 %
 %       % Formulate solving problem with execution config:
 %       cfg = ir.ExecutionConfig('exec-config.yaml', e.SymbolRegistry);
-%       prob = km.formulateProblem(cfg);
+%       prob = km.formulatePoseProblem(cfg);
 %       % prob.Type       — 'FK' or 'IK'
 %       % prob.eval(vals) — for FK: returns 4×4 pose; for IK: returns residual vector
 %
@@ -120,26 +120,31 @@ classdef KinematicModel < handle
             R = T(1:3, 1:3);
         end
 
-        %% formulateProblem  Construct solving problem from execution config.
-        %   prob = obj.formulateProblem(EXECCONFIG)
+        %% formulatePoseProblem  Construct end-frame pose problem (FK / IK via pose error).
+        %   prob = obj.formulatePoseProblem(EXECCONFIG)
         %     EXECCONFIG : ir.ExecutionConfig — validated L3 execution config
         %     prob       : struct with fields:
-        %       .Type       — 'FK' (evaluate pose) or 'IK' (solve residual)
+        %       .Type       — 'FK' (evaluate pose) or 'IK' (solve pose-error residual)
         %       .eval(vals) — function handle:
         %           FK: vals = joint values → returns 4×4 double pose
-        %           IK: vals = joint values → returns residual vector (6×1)
+        %           IK: vals = joint values → returns 6×1 pose-error residual vector
         %       .JointVarNames — cell array of joint variable canonical names
         %       .JointVarOrder — sym array: joint vars in the order expected by eval()
         %       .TargetPose    — 4×4 double (IK only): the desired end-effector pose
         %
-        %   For open_loop FK mode:
-        %     prob = tf.formulateProblem(cfg);
-        %     T_tip = prob.eval([q1_val; q2_val]);  % numeric pose
+        %   NOTE: This formulates a SINGLE-PATH problem — end-frame pose
+        %   (FK evaluation) or end-frame pose error (IK via FK).  It does NOT
+        %   include loop-closure constraints.  For closed-loop residual
+        %   construction, use ClosureSolver.buildFullResidual() instead.
         %
-        %   For closed_loop IK mode (requires target pose set in cfg or passed separately):
-        %     prob = tf.formulateProblem(cfg);
+        %   For open_loop FK:
+        %     prob = tf.formulatePoseProblem(cfg);
+        %     T_tip = prob.eval([q1_val; q2_val]);  % 4×4 numeric pose
+        %
+        %   For open_loop IK:
+        %     prob = tf.formulatePoseProblem(cfg, T_target);
         %     residual = prob.eval([q1; q2; ...]);  % 6×1 pose error
-        function prob = formulateProblem(obj, execConfig, targetPose)
+        function prob = formulatePoseProblem(obj, execConfig, targetPose)
             arguments
                 obj
                 execConfig   (1,1) ir.ExecutionConfig

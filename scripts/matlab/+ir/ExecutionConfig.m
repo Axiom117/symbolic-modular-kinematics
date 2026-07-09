@@ -317,18 +317,11 @@ classdef ExecutionConfig
                 end
             end
 
-            % -- closed_loop: closure_cuts near/far must exist --
-            if ~isempty(obj.ClosureCuts)
-                for i = 1:numel(obj.ClosureCuts)
-                    cut = obj.ClosureCuts(i);
-                    assert(ismember(cut.near, regNames), ...
-                        'ir:ExecutionConfig:refNotFound', ...
-                        'closure_cut near "%s" not found in symbolRegistry.', cut.near);
-                    assert(ismember(cut.far, regNames), ...
-                        'ir:ExecutionConfig:refNotFound', ...
-                        'closure_cut far "%s" not found in symbolRegistry.', cut.far);
-                end
-            end
+            % -- closed_loop: closure_cuts near/far are IR-level frame node names,
+            %    not necessarily in symbolRegistry (port frames are not
+            %    registered as observable symbols).  Validation of their
+            %    existence in the propagated Poses map is deferred to
+            %    solver.ClosureSolver construction.
         end
 
         %% lookupByNameList  Find registry entries matching a list of names.

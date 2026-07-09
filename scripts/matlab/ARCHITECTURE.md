@@ -25,7 +25,7 @@ graph TB
         direction LR
         expander["<b>Expander</b> · Orchestrator<br/>构造函数即完整管线<br/>① 加载 DSL + module library<br/>② localExpandInstance 实例展开<br/>③ mate / closed-mate 连接处理<br/>④ propagate → Poses (sym)<br/>⑤ 输出 SymbolRegistry<br/>evaluateNumeric() 延迟数值代入"]
         edgegraph["<b>EdgeGraph</b> · Accumulator<br/>addFixedTransform / addJoint<br/>addMate / addClosedMate<br/>kind 元数据 + root nodes<br/>propagate → toStruct → PosePropagator<br/>兼容 double / sym 混合 T 矩阵"]
-        kinmodel["<b>KinematicModel</b><br/>符号 FK 薄封装<br/>读 sym 位姿 map<br/>拆 TSym / PosExpr / RotExpr<br/>eval(vals) 数值求值<br/>formulateProblem(cfg) → 求解问题"]
+        kinmodel["<b>KinematicModel</b><br/>符号 FK 薄封装<br/>读 sym 位姿 map<br/>拆 TSym / PosExpr / RotExpr<br/>eval(vals) 数值求值<br/>formulatePoseProblem(cfg) → 位姿求解问题"]
         execcfg["<b>ExecutionConfig</b><br/>L3 执行配置<br/>加载 + Schema 校验<br/>交叉校验 symbolRegistry<br/>partitionVariables()<br/>getSolvingDirection()"]
     end
 
@@ -41,7 +41,7 @@ graph TB
     expander   -.->|"输出 SymbolRegistry"| execcfg
     edgegraph  -->|"toStruct() 过滤 closed_mate<br/>→ propagatePoses()"| poseprop
     kinmodel  -.->|"读取 sym 位姿 map"| edgegraph
-    kinmodel  -->|"formulateProblem()"| execcfg
+    kinmodel  -->|"formulatePoseProblem()"| execcfg
     mod        -->|"addFixedTransform / addJoint / addRoot"| edgegraph
 
     class mech,mod viz
@@ -57,7 +57,7 @@ graph TB
 > 5. `KinematicModel` 是符号 FK 的独立入口：直接读取 `EdgeGraph` 的 sym 位姿，不经过 Expander
 > 6. `module.m` 跳过 Expander，直接调用 `EdgeGraph` 方法构建单模块内部图
 > 7. `Expander` 输出 `SymbolRegistry`（所有 observable 变量清单）→ `ExecutionConfig` 交叉校验
-> 8. `KinematicModel.formulateProblem(cfg)` 读取 `ExecutionConfig` 的 known/unknown 分区，构造 FK 求值函数或 IK 残差函数
+> 8. `KinematicModel.formulatePoseProblem(cfg)` 读取 `ExecutionConfig` 的 known/unknown 分区，构造 FK 求值函数或 IK 位姿残差函数（仅末端位姿误差，不含闭环约束）
 
 ## 各层职责
 
@@ -101,7 +101,7 @@ graph TB
 - `KinematicModel(edgeGraph, endFrame)`：从 pose map 中抽取 `endFrame` 的 4×4 `sym` 位姿，拆解为 `TSym` / `PosExpr` / `RotExpr`，通过 `symvar()` 自动提取 `JointVars`
 - `eval(vals)`：代入数值 joint 值，返回 4×4 double
 - `evalPos(vals)` / `evalRot(vals)`：分别返回位置和旋转分量
-- `formulateProblem(execConfig)`：接收 `ExecutionConfig`，根据 known/unknown 分区构造 FK 求值函数（open_loop）或 IK 残差函数（closed_loop）。返回 struct 含 `.Type`、`.eval(vals)`、`.JointVarNames`、`.TargetPose`
+- `formulatePoseProblem(execConfig)`：接收 `ExecutionConfig`，根据 known/unknown 分区构造 FK 求值函数（open_loop）或 IK 位姿残差函数（closed_loop）。返回 struct 含 `.Type`、`.eval(vals)`、`.JointVarNames`、`.TargetPose`。注意：此方法仅处理末端位姿误差，不含闭环约束；闭环残差构造用 `ClosureSolver.buildFullResidual()`。
 
 ### 执行配置层：`+ir/ExecutionConfig` (value class，A.3.3 新增)
 
@@ -233,14 +233,14 @@ flowchart TD
     E --> F1["cfg.Mode (open_loop / closed_loop)"]
     E --> F2["cfg.partitionVariables() → [known, unknown]"]
     E --> F3["cfg.getSolvingDirection() → 'FK' / 'IK'"]
-    D --> G["prob = tf.formulateProblem(cfg)"]
+    D --> G["prob = tf.formulatePoseProblem(cfg)"]
     F1 & F2 & F3 --> G
     G --> H1["prob.Type = 'FK' / 'IK'"]
     G --> H2["prob.eval(vals)<br/>FK → 4×4 pose<br/>IK → 6×1 residual"]
     G --> H3["prob.JointVarNames / prob.TargetPose"]
 ```
 
-> **求解方向切换**：同一套 L2 机构 + 同一套 KinematicModel，仅通过更换 execution-config YAML 即可在 FK（open_loop）和 IK（closed_loop）之间切换。`formulateProblem` 根据 known/unknown 分区自动构造对应的数值函数。
+> **求解方向切换**：同一套 L2 机构 + 同一套 KinematicModel，仅通过更换 execution-config YAML 即可在 FK（open_loop）和 IK（closed_loop）之间切换。`formulatePoseProblem` 根据 known/unknown 分区自动构造对应的数值函数。
 
 ## 关键设计决策
 

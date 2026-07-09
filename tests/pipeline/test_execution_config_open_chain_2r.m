@@ -1,11 +1,11 @@
 %% test_execution_config_open_chain_2r.m
-% End-to-end test: DSL → Expander → SymbolRegistry → ExecutionConfig → KinematicModel.formulateProblem.
+% End-to-end test: DSL → Expander → SymbolRegistry → ExecutionConfig → KinematicModel.formulatePoseProblem.
 %
 % Verifies the full A.3.3 pipeline:
 %   1. Expander collects SymbolRegistry (observable joints + task frames)
 %   2. ExecutionConfig loads and validates execution-config YAML
 %   3. ExecutionConfig cross-validates against SymbolRegistry
-%   4. KinematicModel.formulateProblem produces FK evaluation function
+%   4. KinematicModel.formulatePoseProblem produces FK evaluation function
 %   5. FK evaluation matches direct KinematicModel.eval output
 %
 % Requires: Symbolic Math Toolbox
@@ -113,7 +113,7 @@ fprintf('OK (endFrame=%s, %d joint vars on path)\n', endFrame, numel(km.JointVar
 
 %% 6. Formulate FK problem via ExecutionConfig
 fprintf('\n6. Formulating FK problem ... ');
-prob = km.formulateProblem(cfg);
+prob = km.formulatePoseProblem(cfg);
 assert(strcmp(prob.Type, 'FK'), 'Problem type must be FK.');
 fprintf('OK\n');
 fprintf('   Type:           %s\n', prob.Type);
@@ -185,6 +185,6 @@ fprintf('   ✓ SymbolRegistry collection (joints + task frames)\n');
 fprintf('   ✓ ExecutionConfig loading and validation\n');
 fprintf('   ✓ Variable partitioning (known/unknown)\n');
 fprintf('   ✓ Solving direction detection (FK)\n');
-fprintf('   ✓ KinematicModel.formulateProblem FK evaluation\n');
+fprintf('   ✓ KinematicModel.formulatePoseProblem FK evaluation\n');
 fprintf('   ✓ FK output matches direct KinematicModel.eval\n');
 fprintf('   ✓ Validation rejects invalid refs\n');

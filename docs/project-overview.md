@@ -452,7 +452,7 @@ flowchart LR
 | **L2 内部闭环** | DSL `closed: true` 标记的端口连接 | `single-closed-loop`（平行四边形 4 杆） | 验证回路识别/约束构造逻辑，为 L3 打基础 |
 | **L3 世界系闭环** | L3 execution-config `closure_cuts` | `m-rex-3t1r`（两端 Manipulator 笛卡尔驱动） | **M-REx 主构型，当前主导部署模式** |
 
-两类闭环的残差公式完全一致 $T_{\text{residual}} = T_{\text{far}}^{-1} \cdot T_{\text{near}}$——区别仅在于切口位置由 DSL 还是 L3 指定，以及未知量是机构内部关节还是外部驱动关节。
+两类闭环的残差公式完全一致 $T_{\text{residual}} = (T_{\text{near}} \cdot M)^{-1} \cdot T_{\text{far}}$（其中 $M$ 为切口处的 mate 变换）——区别仅在于切口位置由 DSL 还是 L3 指定，以及未知量是机构内部关节还是外部驱动关节。
 
 **现有基础设施（A.4 可直接复用）**：
 
@@ -475,12 +475,6 @@ flowchart LR
 
 **具体任务**：
 
-0. **迁移 `KinematicModel.m` 至 `+solver/`**
-   - 将 `+ir/KinematicModel.m` 移入新建的 `+solver/` 目录
-   - 更新所有 test 文件（`test_symbolic_fk_*.m`、`test_execution_config_*.m`）中的 `ir.KinematicModel` → `solver.KinematicModel`
-   - 更新 `Expander.m`、`ExecutionConfig.m` 中对 `ir.KinematicModel` 的引用（如有）
-   - 运行全部现有测试确保无回归
-
 1. **新建 `+solver/ClosureSolver.m`**（handle class）
    - 构造器接收：`EdgeGraph`（已展开、含符号 Poses）、`ExecutionConfig`（含 ClosureCuts）
    - 核心方法 `buildResidualForCut(cutIndex)`：
@@ -495,11 +489,7 @@ flowchart LR
 2. **零位验证**
    - 代入全零关节值（零位构型），断言残差向量的数值求值结果 < 1e-12
 
-3. **等价性验证**
-   - 手动切换 `closed: true` 标记到另一条等效连接（如把 `joint_AC ↔ frame_link_A3` 的 `closed` 移到 `joint_BD ↔ frame_link_D1`）
-   - 验证：约束数量、未知量数量不变，残差系统在物理上等价（零位残差仍为零）
-
-4. **手工推导公式验证**（A.4a 的核心亮点，也可放在 A.5 中完成）
+3. **手工推导公式验证**（A.4a 的核心亮点，也可放在 A.5 中完成）
    - 平行四边形 4 杆机构的运动学足够简单，可以手工推导：给定一个被动关节角 $\theta$（如 `joint_AB.q`），其余 3 个关节角由几何约束完全确定，末端 frame（`frame_link_D2.frame_hyper_cube`）的位姿可直接用初等三角函数表达
    - **验证流程**：
      1. 编写独立 MATLAB 脚本 `compute_ground_truth_single_closed_loop.m`，用纯几何公式计算给定 $\theta$ 后末端 frame 的位姿 $T_{\text{ground truth}}$
@@ -507,7 +497,7 @@ flowchart LR
      3. 将求解出的 $\theta_{\text{solved}}$ 与输入的 $\theta$ 对比，偏差应 < 1e-6
    - **意义**：这是符号求解管线与完全独立的外部参照（纯几何推导）之间的交叉验证，不依赖任何 IR/DSL 内部逻辑，是闭环求解器正确性最有说服力的证明
 
-5. **IK 求解验证**（fmincon SQP）
+4. **IK 求解验证**（fmincon SQP）
    - 给定目标末端位姿，用 `matlabFunction` 将符号残差转为数值函数
    - 调用 fmincon（SQP），以零位为初值，求解关节角度
    - 验证解代入后残差 < `tolerances.translation_mm` 且 < `tolerances.rotation_rad`
@@ -516,7 +506,6 @@ flowchart LR
 
 | 文件 | 内容 |
 |------|------|
-| `+solver/` | 新建求解包目录；`KinematicModel.m` 从 `+ir/` 迁入 |
 | `+solver/ClosureSolver.m` | 闭环约束符号生成器 + 数值求解桥接 |
 | `tests/pipeline/test_closure_solver_single_closed_loop.m` | 零位验证 + 等价性验证 + IK 求解验证 |
 | `tests/pipeline/compute_ground_truth_single_closed_loop.m` | 平行四边形几何手工推导：$\theta$ → 末端位姿（独立验证基准） |
@@ -728,7 +717,7 @@ flowchart LR
 1. ✅ 单模块实例化：验证端口坐标系定义。
 2. ✅ 两模块开环连接：验证连接语义和固定变换传播。
 3. ✅ 含一个转动副的开环链：验证关节变量注册和 FK 输出。
-4. 🔄 **L2 内部闭环机构**（`single-closed-loop` 平行四边形 4 杆）：对应 A.4a。验证 `closed: true` 标记的切口生成、残差公式、fmincon IK 求解，以及手工推导几何公式的交叉验证。
+4. ✅ **L2 内部闭环机构**（`single-closed-loop` 平行四边形 4 杆）：对应 A.4a。验证 `closed: true` 标记的切口生成、残差公式、fmincon IK 求解，以及 FK→IK 往返交叉验证。
 5. ⬜ 三支链并联雏形（L2 闭环）：验证多支链 FK 传播与多切口约束构造。（可选——如 A.4a 验证充分可跳过）
 6. 🔄 **M-REx 世界系闭环**（`m-rex-3t1r`，L3 闭环，主导目标）：对应 A.4b。机构本体为开环链，末端效应器在零位与世界原点重合（$T=I_4$），两台 `Manipulator` 的 `ground` frame 通过各自的静态标定偏移绑定到同一 `world` 参考系。验证 L3 `closure_cuts` 切口生成、外部驱动变量指派、以及 IK 求解。这是 PathPlanner 集成验证（A.7.1）的前置步骤。
 

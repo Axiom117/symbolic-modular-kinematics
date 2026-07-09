@@ -8,9 +8,7 @@
 # 未列出的关节变量默认取 0（零位）。几何参数（cubeLength、tipDistance 等）
 # 不在此文件中，仍由 <module_library>/config/dimensions.yaml 按 module_type 提供。
 #
-# 默认全零（零位=平行四边形展平呈直线，回路最大张开）。
-# 补边（closed）端口在零位并不重合——mate 报告会显示该 chord 的闭环残差
-# （直线构型下约 160mm），正是 A.4 需要求解归零的约束量；树边残差恒为 0。
+# 默认全零（零位=平行四边形正好处于闭合状态）。
 
 joint_AB:
   q: 0
