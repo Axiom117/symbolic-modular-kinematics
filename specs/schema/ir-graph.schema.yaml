@@ -3,7 +3,7 @@
 # ir.Expander after full DSL→IR expansion.
 #
 # 这是 JSON Schema，用于校验 IR 图的结构完整性。
-# 基于 EdgeGraph.toStruct() 输出格式 + Expander.Instances struct 结构编写。
+# 基于 EdgeGraph.exportEdges() 输出格式 + Expander.Instances struct 结构编写。
 # 严格遵循 ir/node-types.md 与 ir/edge-types.md；凡冲突以节点/边规范为准。
 #
 # 注意：IR 图是 MATLAB 内部数据结构，本 schema 用于概念校验与文档化，
@@ -19,7 +19,7 @@ additionalProperties: false
 required:
   - nodes
   - edges
-  - rootNodes
+  - rootNode
 
 properties:
   nodes:
@@ -70,12 +70,9 @@ properties:
         items:
           $ref: "#/$defs/edge"
 
-  rootNodes:
-    description: FK 传播根节点（seed pose = I₄）的实例限定名列表。工具端生长范式下通常为工具模块参考 frame。
-    type: array
-    items:
-      type: string
-      description: 实例限定名，如 "manipulator.ground" 或 "frame0.body"。
+  rootNode:
+    description: FK 传播根节点（seed pose = I₄）的实例限定名（单根）。工具端生长范式下通常为工具模块参考 frame；未注册时为空字符串。
+    type: string
 
 # ---------------------------------------------------------------------------
 # 复用定义

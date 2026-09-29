@@ -1,8 +1,8 @@
 # 端口连接在 IR 中的表示（阶段 A.3.1）
 
 > 本文档定义端口连接（mate）在 IR（中间表示）层的精确边表示：标准 mate 变换、
-> `addMate` vs `addClosedMate` 两种边类型、极性门控规则。
-> 权威代码来源：`scripts/matlab/+ir/EdgeGraph.m`（`addMate`、`addClosedMate`）。
+> `addMateBidirectional` vs `addMateUnidirectional` 两种边类型、极性门控规则。
+> 权威代码来源：`scripts/matlab/+ir/EdgeGraph.m`（`addMateBidirectional`、`addMateUnidirectional`）。
 > DSL 层的连接语义定义见 `../dsl/connection-semantics.md`。
 >
 > **状态**：A.3.1 v0。以已验证的 MATLAB 代码为准反推，非从零设计。
@@ -14,13 +14,13 @@
 | 层级 | 文档 | 定义内容 |
 |------|------|------|
 | DSL 层 | `../dsl/connection-semantics.md` | 连接在 YAML 中的语法、标准 mate 变换公式、`roll` 参数语义、`closed` 标记含义 |
-| IR 层 | **本文档** | mate 变换在 IR 图中的边表示、`addMate`/`addClosedMate` 两种边类型、FK 传播参与规则 |
+| IR 层 | **本文档** | mate 变换在 IR 图中的边表示、`addMateBidirectional`/`addMateUnidirectional` 两种边类型、FK 传播参与规则 |
 
 两文档通过标准 mate 变换公式桥接：
 
 $$T_{\text{plug} \leftarrow \text{socket}} = R_z\!\left(\text{roll} \cdot \tfrac{2\pi}{\text{symmetry}}\right) \cdot R_x(\pi), \qquad t = 0$$
 
-该公式在 `connection-semantics.md` §2.1 中定义，在 IR 层原样使用（`EdgeGraph.addMate` L76-79）。
+该公式在 `connection-semantics.md` §2.1 中定义，在 IR 层由 `EdgeGraph.mateTransform`（L197-202）实现。
 
 ---
 
@@ -30,7 +30,7 @@ $$T_{\text{plug} \leftarrow \text{socket}} = R_z\!\left(\text{roll} \cdot \tfrac
 
 $$T_{\text{plug} \leftarrow \text{socket}} = R_z\!\left(\text{roll} \cdot \tfrac{2\pi}{\text{symmetry}}\right) \cdot R_x(\pi), \qquad t = 0$$
 
-IR 层的唯一差异在**边的方向性**：`addMate` 双向插入（参与 FK），`addClosedMate` 单向插入（不参与 FK，toStruct 排除）。
+IR 层的唯一差异在**边的方向性**：`addMateBidirectional` 双向插入（参与 FK），`addMateUnidirectional` 单向插入（不参与 FK，exportEdges 排除）。
 
 ---
 
@@ -70,11 +70,11 @@ end
 
 ---
 
-## 4. addMate：生成树边
+## 4. addMateBidirectional：生成树边
 
 ### 4.1 语义
 
-`addMate` 表示**生成树边**（spanning-tree edge）——机构主干位姿流向的一部分。
+`addMateBidirectional` 表示**生成树边**（spanning-tree edge）——机构主干位姿流向的一部分。
 
 ### 4.2 特性
 
@@ -83,27 +83,27 @@ end
 | 方向 | **双向**（socket→plug + plug→socket 逆变换） |
 | kind | `'mate'` |
 | 参与 FK 传播 | **是** |
-| toStruct 保留 | **是** |
+| exportEdges 保留 | **是** |
 | DSL 对应 | `closed: false`（默认）的连接 |
 
 ### 4.3 代码
 
 ```matlab
-% EdgeGraph.m L70-82
-function addMate(obj, socket, plug, roll, symmetry)
-    ...
+% EdgeGraph.m L74-82
+function addMateBidirectional(obj, socket, plug, roll, symmetry)
+    Tm = obj.mateTransform(roll, symmetry);
     obj.addEdge(socket, plug, Tm, 'mate');
-    obj.addEdge(plug, socket, localInvT(Tm), 'mate');
+    obj.addEdge(plug, socket, core.RigidBodyMath.invT(Tm), 'mate');
 end
 ```
 
 ---
 
-## 5. addClosedMate：弦边（诊断专用）
+## 5. addMateUnidirectional：弦边（诊断专用）
 
 ### 5.1 语义
 
-`addClosedMate` 表示**弦边**（chord edge）——闭环的切口（cut），不参与位姿传播。
+`addMateUnidirectional` 表示**弦边**（chord edge）——闭环的切口（cut），不参与位姿传播。
 
 ### 5.2 特性
 
@@ -112,7 +112,7 @@ end
 | 方向 | **单向**（仅 socket→plug） |
 | kind | `'closed_mate'` |
 | 参与 FK 传播 | **否** |
-| toStruct 保留 | **否**（被过滤） |
+| exportEdges 保留 | **否**（被过滤） |
 | DSL 对应 | `closed: true` 的连接 |
 
 ### 5.3 为什么弦边不能用于传播
@@ -124,18 +124,18 @@ end
 ### 5.4 代码
 
 ```matlab
-% EdgeGraph.m L88-98
-function addClosedMate(obj, socket, plug, roll, symmetry)
-    ...
+% EdgeGraph.m L89-97
+function addMateUnidirectional(obj, socket, plug, roll, symmetry)
+    Tm = obj.mateTransform(roll, symmetry);
     obj.addEdge(socket, plug, Tm, 'closed_mate');
     % 注意：不插入逆向边
 end
 ```
 
-### 5.5 toStruct 排除
+### 5.5 exportEdges 排除
 
 ```matlab
-% EdgeGraph.m L132-133
+% EdgeGraph.m L140-141
 keepMask = ~strcmp({obj.Edges.kind}, 'closed_mate');
 s = obj.Edges(keepMask);
 ```
@@ -190,18 +190,18 @@ s = obj.Edges(keepMask);
 
 | 规范条目 | 代码位置 |
 |------|------|
-| 标准 mate 变换公式 | `EdgeGraph.m` L76-79 (`addMate`) |
-| `Rx(π)` 翻转 | `EdgeGraph.m` L78 (`rotx(pi)`) |
-| `Rz(θ)` 离散滚转 | `EdgeGraph.m` L76 (`rotz(rollAngle)`) |
-| 平移为零 | `EdgeGraph.m` L79 (`[0;0;0]`) |
-| addMate 双向插入 | `EdgeGraph.m` L80-82 |
-| addClosedMate 单向插入 | `EdgeGraph.m` L95-97 |
+| 标准 mate 变换公式 | `EdgeGraph.m` L197-202 (`mateTransform`) |
+| `Rx(π)` 翻转 | `EdgeGraph.m` L200 (`rotx(pi)`) |
+| `Rz(θ)` 离散滚转 | `EdgeGraph.m` L198 (`rotz(rollAngle)`) |
+| 平移为零 | `EdgeGraph.m` L201 (`[0;0;0]`) |
+| addMateBidirectional 双向插入 | `EdgeGraph.m` L80-82 |
+| addMateUnidirectional 单向插入 | `EdgeGraph.m` L96-97 |
 | 极性门控 | `Expander.m` L121-133 |
 | 方向约定（极性决定父/子） | `Expander.m` L123-128 |
 | roll 默认值 | `Expander.m` L136 (`field(cn, 'roll', 0)`) |
 | symmetry 默认值（来自 socket） | `Expander.m` L137 (`field(sk, 'symmetry', 4)`) |
 | closed 判断 | `Expander.m` L138 |
-| toStruct 排除 closed_mate | `EdgeGraph.m` L132-133 |
+| exportEdges 排除 closed_mate | `EdgeGraph.m` L140-141 |
 | mate gap 计算 | `mechanism.m` (mate diagnostics section) |
 | Zdot 计算 | `mechanism.m` (mate diagnostics section) |
 | mate 变换公式权威定义 | `connection-semantics.md` §2.1 |

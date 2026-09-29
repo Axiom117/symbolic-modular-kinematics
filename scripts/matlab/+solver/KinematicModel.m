@@ -67,7 +67,7 @@ classdef KinematicModel < handle
 
             % propagate poses through the symbolic edge graph.
             % PosePropagator.propagatePoses handles mixed double/sym T matrices
-            % transparently; closed_mate edges are excluded by toStruct().
+            % transparently; closed_mate edges are excluded by exportEdges().
             poses = edgeGraph.propagate();
 
             assert(isKey(poses, endFrame), ...

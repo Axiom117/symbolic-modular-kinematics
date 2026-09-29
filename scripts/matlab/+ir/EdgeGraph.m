@@ -1,25 +1,26 @@
 classdef EdgeGraph < handle
 %EDGEGRAPH  Shared pose-graph intermediate representation (IR).
-%   A handle-class container for the directed pose graph that sits
-%   between module/mechanism YAML parsing and FK propagation.
 %
-%   EDGEGRAPH is NOT a solver — it accumulates edges (fixed-transforms,
-%   joints, mates) and ground-node labels, then feeds them to the
-%   existing +core/PosePropagator propagation engine.
+%   ROLE | 类定位
+%   -------------------------
+%   A handle-class "Data Container" for the directed pose graph that 
+%   accumulates pose-graph data (directed edges + root labels) and 
+%   hands them to the +core/PosePropagator FK engine.
 %
-%   Why a handle class:
-%     - viz.module and viz.mechanism build edges incrementally across
-%       many sub-function calls.  MATLAB value semantics would force
-%       pass-in/pass-out of the accumulator on every call.
-%     - A handle class provides in-place mutation, keeping call sites
-%       clean while retaining the existing struct-based edge format
-%       that PosePropagator.propagatePoses expects.
+%   CONTAINED DATA | 包含的成员
+%   ---------------------------
+%   Edges     : struct array with fields {from, to, T, kind}
+%               from/to : char — 帧 / 节点名
+%               T       : 4x4 double homogeneous transform
+%               kind    : char — 'fixed' | 'joint' | 'mate' | 'closed_mate'
+%   RootNode  : char — frame name that seeds FK propagation (single root)
 %
-%   Usage (mechanism context):
+%   USAGE | 用法
+%   --------------------------------
 %       g = ir.EdgeGraph();
 %       g.addFixedTransform('frame0.body','frame0.faceXPlus', T);
 %       g.addJoint('j1.linkA','j1.linkB', [1;0;0], q, 'revolute');
-%       g.addMate('frame0.faceXPlus','j1.linkA', 0, 4);
+%       g.addMateBidirectional('frame0.faceXPlus','j1.linkA', 0, 4);
 %       g.addRoot('toolpipette.tip_origin');
 %       poses = g.propagate();
 %
@@ -33,8 +34,8 @@ classdef EdgeGraph < handle
         %   kind     : char — 'fixed' | 'joint' | 'mate'
         Edges (:,1) struct = struct('from', {}, 'to', {}, 'T', {}, 'kind', {})
 
-        % RootNodes – cell array of frame names that seed FK propagation
-        RootNodes (:,1) cell = {}
+        % RootNode – frame name that seeds FK propagation (single root)
+        RootNode (1,:) char = ''
     end
 
     % ---- public methods ----
@@ -48,7 +49,7 @@ classdef EdgeGraph < handle
 
             % bidirectional edges: FROM→TO and TO→FROM (inverse transform), ensuring that the graph is traversable in either direction
             obj.addEdge(from, to, T, 'fixed');
-            obj.addEdge(to, from, localInvT(T), 'fixed');
+            obj.addEdge(to, from, core.RigidBodyMath.invT(T), 'fixed');
         end
 
         %% addJoint  Insert a bidirectional joint edge pair.
@@ -60,85 +61,85 @@ classdef EdgeGraph < handle
         function addJoint(obj, from, to, axis, value, kind)
             T = core.PosePropagator.jointTransform(kind, axis, value);
             obj.addEdge(from, to, T, 'joint');
-            obj.addEdge(to, from, localInvT(T), 'joint');
+            obj.addEdge(to, from, core.RigidBodyMath.invT(T), 'joint');
         end
 
-        %% addMate  Insert a bidirectional mate edge pair (socket↔plug).
-        %   obj.addMate(SOCKET, PLUG, ROLL, SYMMETRY)
+        %% addMateBidirectional  Insert a bidirectional mate edge pair (socket↔plug).
+        %   obj.addMateBidirectional(SOCKET, PLUG, ROLL, SYMMETRY)
         %     SOCKET    : char — socket-frame node name
         %     PLUG      : char — plug-frame node name
         %     ROLL      : integer (default 0) — roll index (0..symmetry-1)
         %     SYMMETRY  : integer (default 4) — rotational symmetry count
         %   Mate transform: T = Rz(roll * 2*pi/symmetry) * Rx(pi)
         %   See specs/dsl/connection-semantics.md for the convention.
-        function addMate(obj, socket, plug, roll, symmetry)
+        function addMateBidirectional(obj, socket, plug, roll, symmetry)
             if nargin < 5 || isempty(symmetry); symmetry = 4; end
             if nargin < 4 || isempty(roll); roll = 0; end
-            rollAngle = roll * 2 * pi / symmetry;
-            Tm = core.RigidBodyMath.T( ...
-                core.RigidBodyMath.rotz(rollAngle) * core.RigidBodyMath.rotx(pi), ...
-                [0; 0; 0]);
+            Tm = obj.mateTransform(roll, symmetry);
 
             % bidirectional edges: SOCKET→PLUG and PLUG→SOCKET (inverse transform), ensuring that the graph is traversable in either direction
             obj.addEdge(socket, plug, Tm, 'mate');
-            obj.addEdge(plug, socket, localInvT(Tm), 'mate');
+            obj.addEdge(plug, socket, core.RigidBodyMath.invT(Tm), 'mate');
         end
 
-        %% addClosedMate  Insert a one-directional diagnostic-only mate edge.
+        %% addMateUnidirectional  Insert a one-directional diagnostic-only mate edge.
         %   Used for chord edges in closed kinematic loops.  These edges
         %   are NOT propagated through (they are the cut of a loop);
         %   they exist only to report the loop-closure residual gap.
-        %   Unlike addMate, this does NOT insert a reverse edge.
-        function addClosedMate(obj, socket, plug, roll, symmetry)
+        %   Unlike addMateBidirectional, this does NOT insert a reverse edge.
+        function addMateUnidirectional(obj, socket, plug, roll, symmetry)
             if nargin < 5 || isempty(symmetry); symmetry = 4; end
             if nargin < 4 || isempty(roll); roll = 0; end
-            rollAngle = roll * 2 * pi / symmetry;
-            Tm = core.RigidBodyMath.T( ...
-                core.RigidBodyMath.rotz(rollAngle) * core.RigidBodyMath.rotx(pi), ...
-                [0; 0; 0]);
+            Tm = obj.mateTransform(roll, symmetry);
 
             % one-way edge for loop-closure diagnostics; kind='closed_mate'
-            % ensures toStruct() excludes it from FK propagation
+            % ensures exportEdges() excludes it from FK propagation
             obj.addEdge(socket, plug, Tm, 'closed_mate');
         end
 
-        %% addRoot  Register a frame as a propagation root (seed pose = eye(4)).
-        %   During propagate(), every root node is seeded with
-        %   pose = eye(4).  Multiple root nodes are supported for
-        %   multi-branch / parallel mechanisms.
+        %% addRoot  Register the propagation root (seed pose = eye(4)).
+        %   EdgeGraph supports a SINGLE root node.  Registering a second,
+        %   different node raises an error; re-registering the same node
+        %   is a no-op.
         %
         %   In the tool-rooted growth paradigm, the root is typically a
         %   tool reference frame (e.g. ToolPipette.tip_origin) from which
         %   the mechanism grows outward toward manipulator modules.
         function addRoot(obj, node)
-            obj.RootNodes{end+1} = node;
+            if isempty(obj.RootNode)
+                obj.RootNode = node;
+            elseif ~strcmp(obj.RootNode, node)
+                error('ir:EdgeGraph:multipleRoots', ...
+                    ['EdgeGraph supports a single root node. ' ...
+                     'Already registered "%s", got "%s".'], ...
+                    obj.RootNode, node);
+            end
         end
 
         %% propagate  Run FK propagation and return a pose map.
         %   poses = g.propagate()
         %     returns containers.Map where keys are frame names and
         %     values are 4x4 homogeneous transforms.
-        %     If no root nodes are registered, the 'from' field of the
+        %     If no root node is registered, the 'from' field of the
         %     first edge is used as the root.
         function poses = propagate(obj)
             seed = containers.Map('KeyType', 'char', 'ValueType', 'any');
-            if ~isempty(obj.RootNodes)
-                for k = 1:numel(obj.RootNodes)
-                    seed(obj.RootNodes{k}) = eye(4);
-                end
+            if ~isempty(obj.RootNode)
+                seed(obj.RootNode) = eye(4);
             elseif ~isempty(obj.Edges)
-                % use the 'from' node of the first edge as the root if no root nodes are registered
+                % use the 'from' node of the first edge as the root if no root node is registered
                 seed(obj.Edges(1).from) = eye(4);
             end
-            edgeStruct = obj.toStruct();
+            edgeStruct = obj.exportEdges();
             poses = core.PosePropagator.propagatePoses(edgeStruct, seed);
         end
 
-        %% toStruct  Export edges as the struct array that PosePropagator expects.
-        %   s = g.toStruct() returns a struct array with fields
+        %% exportEdges  Export the FK-ready edge array (Edges minus chord edges).
+        %   s = g.exportEdges() returns a struct array with fields
         %   'from', 'to', 'T' — exactly the format consumed by
-        %   PosePropagator.propagatePoses(edges, seed).
-        function s = toStruct(obj)
+        %   PosePropagator.propagatePoses(edges, seed).  Closed-mate
+        %   (chord) edges are excluded and 'kind' metadata is dropped.
+        function s = exportEdges(obj)
             % exclude closed_mate (diagnostic-only) edges from FK propagation.
             % closed_mate edges represent chord cuts of kinematic loops and
             % must not participate in pose propagation — their sole purpose
@@ -179,20 +180,33 @@ classdef EdgeGraph < handle
             n = numel(obj.Edges);
         end
 
-        %% numRootNodes  Number of registered root nodes.
+        %% numRootNodes  Number of registered root nodes (0 or 1).
         function n = numRootNodes(obj)
-            n = numel(obj.RootNodes);
+            n = double(~isempty(obj.RootNode));
         end
 
-        %% hasRootNodes  True when at least one root node is registered.
+        %% hasRootNodes  True when a root node is registered.
         function tf = hasRootNodes(obj)
-            tf = ~isempty(obj.RootNodes);
+            tf = ~isempty(obj.RootNode);
         end
 
     end
 
     % ---- private helpers ----
     methods (Access = private)
+
+        %% mateTransform  Build the socket→plug mate transform (shared helper).
+        %   Tm = obj.mateTransform(ROLL, SYMMETRY)
+        %     returns the 4x4 homogeneous transform
+        %     T = Rz(roll * 2*pi/symmetry) * Rx(pi), t = 0.
+        %   Used by both addMateBidirectional and addMateUnidirectional.
+        %   See specs/dsl/connection-semantics.md for the convention.
+        function Tm = mateTransform(~, roll, symmetry)
+            rollAngle = roll * 2 * pi / symmetry;
+            Tm = core.RigidBodyMath.T( ...
+                core.RigidBodyMath.rotz(rollAngle) * core.RigidBodyMath.rotx(pi), ...
+                [0; 0; 0]);
+        end
 
         %% addEdge  Append a single directed edge (internal).
         function addEdge(obj, from, to, T, kind)
@@ -205,17 +219,4 @@ classdef EdgeGraph < handle
 
     end
 
-end
-
-%% ---- local function (not a method) ----
-
-function Ti = localInvT(T)
-    R = T(1:3,1:3); t = T(1:3,4);
-    if isa(T, 'sym')
-        Ti = sym(eye(4));
-    else
-        Ti = eye(4);
-    end
-    Ti(1:3,1:3) = R';
-    Ti(1:3,4) = -R' * t;
 end

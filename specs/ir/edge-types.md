@@ -1,7 +1,7 @@
 # IR 边类型规范（阶段 A.3.1）
 
 > 本文档定义 IR（中间表示）图中四种边的类型、变换公式、双向插入规则和 FK 传播行为。
-> 权威代码来源：`scripts/matlab/+ir/EdgeGraph.m`（所有 `add*` 方法 + `toStruct`）。
+> 权威代码来源：`scripts/matlab/+ir/EdgeGraph.m`（所有 `add*` 方法 + `exportEdges`）。
 >
 > **状态**：A.3.1 v0。以已验证的 MATLAB 代码为准反推，非从零设计。
 
@@ -9,7 +9,7 @@
 
 ## 1. 概述
 
-IR 图是一个**有向图**，边存储在 `EdgeGraph.Edges` struct 数组中。每种边在插入时遵循特定的双向/单向规则，在 FK 传播时通过 `toStruct()` 过滤。
+IR 图是一个**有向图**，边存储在 `EdgeGraph.Edges` struct 数组中。每种边在插入时遵循特定的双向/单向规则，在 FK 传播时通过 `exportEdges()` 过滤。
 
 ### 1.1 通用边结构
 
@@ -27,7 +27,7 @@ struct('from', <char>, 'to', <char>, 'T', <4×4 double>, 'kind', <char>)
 
 ### 1.2 边类型枚举
 
-| kind | 含义 | 双向 | 参与 FK | toStruct 保留 |
+| kind | 含义 | 双向 | 参与 FK | exportEdges 保留 |
 |------|------|------|------|------|
 | `'fixed'` | 固定刚体变换 | 是 | 是 | 是 |
 | `'joint'` | 关节自由度变换 | 是 | 是 | 是 |
@@ -62,7 +62,7 @@ $R$ 由 `rotation` 字段求值（`align`/`rpy`/`axis_angle`），$t$ 由 `trans
 
 ## 4. mate 边
 
-双向插入生成树边（`EdgeGraph.addMate`，L70-82）。
+双向插入生成树边（`EdgeGraph.addMateBidirectional`，L74-82）。
 
 $$T_{\text{plug} \leftarrow \text{socket}} = R_z\!\left(\text{roll} \cdot \tfrac{2\pi}{\text{symmetry}}\right) \cdot R_x(\pi), \qquad t = 0$$
 
@@ -74,18 +74,18 @@ $$T_{\text{plug} \leftarrow \text{socket}} = R_z\!\left(\text{roll} \cdot \tfrac
 
 ## 5. closed_mate 边
 
-**单向插入**（`EdgeGraph.addClosedMate`，L88-98）：仅 `socket→plug`。变换公式同 §4。
+**单向插入**（`EdgeGraph.addMateUnidirectional`，L89-97）：仅 `socket→plug`。变换公式同 §4。
 
-- **不参与 FK 传播**：toStruct 过滤（§6），诊断专用（计算闭环残差 gap/Zdot）
+- **不参与 FK 传播**：exportEdges 过滤（§6），诊断专用（计算闭环残差 gap/Zdot）
 - **可视化**：橙色粗虚线
 
-## 6. toStruct 过滤规则
+## 6. exportEdges 过滤规则
 
-`EdgeGraph.propagate()` 在调用 `PosePropagator.propagatePoses` 前，通过 `toStruct()` 剥离元数据并排除诊断边：
+`EdgeGraph.propagate()` 在调用 `PosePropagator.propagatePoses` 前，通过 `exportEdges()` 剥离元数据并排除诊断边：
 
 ```matlab
-% EdgeGraph.m L129-137
-function s = toStruct(obj)
+% EdgeGraph.m L135-144
+function s = exportEdges(obj)
     keepMask = ~strcmp({obj.Edges.kind}, 'closed_mate');
     s = obj.Edges(keepMask);
     s = rmfield(s, 'kind');
@@ -110,10 +110,10 @@ end
 ### 7.2 逆向变换
 
 ```matlab
-% EdgeGraph.m L214-217 (localInvT)
-function Ti = localInvT(T)
+% +core/RigidBodyMath.m (invT)
+function Ti = invT(T)
     R = T(1:3,1:3); t = T(1:3,4);
-    Ti = eye(4); Ti(1:3,1:3) = R'; Ti(1:3,4) = -R' * t;
+    Ti = core.RigidBodyMath.T(R', -R' * t);
 end
 ```
 
@@ -125,8 +125,8 @@ $$T^{-1} = \begin{bmatrix} R^T & -R^T t \\ 0 & 1 \end{bmatrix}$$
 |------|------|------|
 | `addFixedTransform` | 2 | 2 |
 | `addJoint` | 2 | 2 |
-| `addMate` | 2 | 2 |
-| `addClosedMate` | 1 | 1 |
+| `addMateBidirectional` | 2 | 2 |
+| `addMateUnidirectional` | 1 | 1 |
 
 ---
 
@@ -135,13 +135,14 @@ $$T^{-1} = \begin{bmatrix} R^T & -R^T t \\ 0 & 1 \end{bmatrix}$$
 | 规范条目 | 代码位置 |
 |------|------|
 | 通用边结构 `{from, to, T, kind}` | `EdgeGraph.m` L31 (`Edges` property) + L205-210 (`addEdge`) |
-| `addFixedTransform` 双向插入 | `EdgeGraph.m` L48-53 |
-| `addJoint` 双向插入 | `EdgeGraph.m` L58-63 |
-| `addMate` 双向插入 + mate 变换 | `EdgeGraph.m` L70-82 |
-| `addClosedMate` 单向插入 | `EdgeGraph.m` L88-98 |
+| `addFixedTransform` 双向插入 | `EdgeGraph.m` L47-52 |
+| `addJoint` 双向插入 | `EdgeGraph.m` L60-64 |
+| `addMateBidirectional` 双向插入 + mate 变换 | `EdgeGraph.m` L74-82 |
+| `addMateUnidirectional` 单向插入 | `EdgeGraph.m` L89-97 |
+| mate 变换（双向/单向共享） | `EdgeGraph.m` L197-202 (`mateTransform`) |
 | `jointTransform` revolute 公式 | `PosePropagator.m` L12-25 |
 | `jointTransform` prismatic 公式 | `PosePropagator.m` L15-19 |
-| `toStruct` 过滤规则 | `EdgeGraph.m` L129-137 |
-| 逆向变换 `localInvT` | `EdgeGraph.m` L214-217 |
+| `exportEdges` 过滤规则 | `EdgeGraph.m` L135-144 |
+| 逆向变换 `invT`（SE(3) 闭式） | `+core/RigidBodyMath.m` |
 | `Rx(π)` 翻转约定 | `conventions.yaml` → `connection.mate_flip_axis` |
 | mate 变换公式 | `conventions.yaml` → `connection.mate_transform` |

@@ -19,6 +19,14 @@ classdef RigidBodyMath
             T(1:3,4) = tr(:);
         end
 
+        %% invert a 4x4 homogeneous transform using the SE(3) closed form
+        %   Ti = INVT(T): for T = [R t; 0 1] returns Ti = [R' -R'*t; 0 1].
+        %   Faster and symbolically cleaner than inv(T); preserves sym type.
+        function Ti = invT(T)
+            R = T(1:3,1:3); t = T(1:3,4);
+            Ti = core.RigidBodyMath.T(R', -R'*t);
+        end
+
         %% elementary rotation about the X axis
         function R = rotx(a)
             R = [1 0 0; 0 cos(a) -sin(a); 0 sin(a) cos(a)];
@@ -43,9 +51,9 @@ classdef RigidBodyMath
                 if isa(q, 'sym'); R = sym(R); end
                 return;
             end
-            w = ax(:) / n;
-            K = [0 -w(3) w(2); w(3) 0 -w(1); -w(2) w(1) 0];
-            R = eye(3) + sin(q)*K + (1 - cos(q))*(K*K);
+            w = ax(:) / n;  % w is the unit rotation axis
+            K = [0 -w(3) w(2); w(3) 0 -w(1); -w(2) w(1) 0]; % K is the skew-symmetric matrix of w
+            R = eye(3) + sin(q)*K + (1 - cos(q))*(K*K); % Rodrigues formula for rotation matrix
         end
 
         %% convert a string like 'X', '-Y', 'Z' into a 3x1 axis vector

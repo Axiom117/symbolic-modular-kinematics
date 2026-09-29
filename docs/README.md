@@ -84,9 +84,9 @@ graph TD
 | 文件 | 说明 |
 |------|------|
 | `specs/ir/node-types.md` | IR 节点类型规范：body / frame / joint 记录 / root node。以 `Expander.m` + `EdgeGraph.m` 代码为准反推。 |
-| `specs/ir/edge-types.md` | IR 边类型规范：fixed / joint / mate / closed_mate，变换公式、双向插入规则、toStruct 过滤。以 `EdgeGraph.m` 为准。 |
+| `specs/ir/edge-types.md` | IR 边类型规范：fixed / joint / mate / closed_mate，变换公式、双向插入规则、exportEdges 过滤。以 `EdgeGraph.m` 为准。 |
 | `specs/ir/dsl-to-ir-mapping.md` | DSL→IR 完整 7 步映射管线：加载→参数注入→展开→连接→root fallback→FK 传播。以 `Expander.m` 为准。 |
-| `specs/ir/port-attachment.md` | Mate 连接在 IR 中的边表示：`addMate`（生成树边）vs `addClosedMate`（弦边）。DSL 层对应 `connection-semantics.md`。 |
+| `specs/ir/port-attachment.md` | Mate 连接在 IR 中的边表示：`addMateBidirectional`（生成树边）vs `addMateUnidirectional`（弦边）。DSL 层对应 `connection-semantics.md`。 |
 | `specs/ir/symbol-registry.md` | ⚪ **待写** — 变量注册表规范（project-overview A.3.3 引用但尚未创建） |
 
 ### L6 · Schema 校验
@@ -133,9 +133,9 @@ graph TD
 | `specs/dsl/validation-checklist.md` | Schema 静态校验 vs 解释器校验的分界清单 | 校验边界 | `grammar.md`, `mechanism-assembly.schema.yaml` | 解释器校验实现 |
 | `specs/dsl/case-conventions.md` | DSL 案例目录规范、README 模板、Mermaid 绘图 7 规则 | 流程规范 | `grammar.md` | 全部 DSL 案例目录 |
 | `specs/ir/node-types.md` | IR 节点类型（body/frame/joint 记录/root node） | 权威 IR 规范 | `modeling-conventions.md`, `Expander.m`, `EdgeGraph.m` | `ir-graph.schema.yaml`, `ARCHITECTURE.md` |
-| `specs/ir/edge-types.md` | IR 边类型（fixed/joint/mate/closed_mate）、变换公式、toStruct 过滤 | 权威 IR 规范 | `EdgeGraph.m`, `conventions.yaml` | `port-attachment.md`, `ir-graph.schema.yaml`, `ARCHITECTURE.md` |
+| `specs/ir/edge-types.md` | IR 边类型（fixed/joint/mate/closed_mate）、变换公式、exportEdges 过滤 | 权威 IR 规范 | `EdgeGraph.m`, `conventions.yaml` | `port-attachment.md`, `ir-graph.schema.yaml`, `ARCHITECTURE.md` |
 | `specs/ir/dsl-to-ir-mapping.md` | DSL→IR 完整 7 步映射管线（加载→参数注入→展开→连接→root→FK） | 权威 IR 规范 | `Expander.m`, `grammar.md`, `module-definition.schema.yaml` | `ARCHITECTURE.md` |
-| `specs/ir/port-attachment.md` | Mate 连接在 IR 中的边表示（addMate vs addClosedMate） | 权威 IR 规范 | `connection-semantics.md`, `EdgeGraph.m` | `ir-graph.schema.yaml`, `ARCHITECTURE.md` |
+| `specs/ir/port-attachment.md` | Mate 连接在 IR 中的边表示（addMateBidirectional vs addMateUnidirectional） | 权威 IR 规范 | `connection-semantics.md`, `EdgeGraph.m` | `ir-graph.schema.yaml`, `ARCHITECTURE.md` |
 | `specs/schema/*.schema.yaml` | 3 份 JSON Schema：模块 YAML / DSL YAML / IR 图 的结构校验 | 可执行校验 | 对应层的权威 docs + `conventions.yaml` | 校验工具链 |
 | `scripts/matlab/ARCHITECTURE.md` | MATLAB 4 层代码架构（+viz / +ir / +core）、数据流、设计决策 | 实现文档 | 全部 IR spec, `connection-semantics.md`, `Expander.m`/`EdgeGraph.m` 代码 | `scripts/matlab/README.md` |
 | `docs/reference/*` | 4 份背景参考：IK 求解器、PathPlanner、Simulink 库、URDF 分析 | 背景参考 | — | `project-overview.md`（引为参考依据） |

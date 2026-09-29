@@ -17,7 +17,7 @@ classdef PosePropagator
                     if n < eps
                         d = [0; 0; 0];
                     else
-                        d = ax(:) / n * val;
+                        d = ax(:) / n * val; % d is the translation vector along the axis scaled by the prismatic value
                     end
                     T = core.RigidBodyMath.T(eye(3), d);
                 otherwise  % revolute

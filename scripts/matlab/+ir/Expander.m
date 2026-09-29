@@ -34,8 +34,10 @@ classdef Expander < handle
 
     % ---- private properties ----
     properties (Access = private)
-        DefCache_                           % containers.Map: module_type → parsed module def, cached to avoid reloading YAML for repeated types
-        SymbolRegistry_ (:,1) struct = struct('name', {}, 'type', {}, 'symHandle', {}, 'scope', {}, 'module_type', {}, 'instance', {})  % accumulator built during expansion
+        DefCache_                           % containers.Map: module_type → parsed module def
+        SymbolRegistry_ (:,1) struct = struct('name', {}, 'type', {}, 'symHandle', {}, 'scope', {}, 'module_type', {}, 'instance', {})
+        PoseFuncs_                          % containers.Map: frame name → function_handle (populated by compilePoseFunctions)
+        PoseFuncVars_                       % sym array: joint variables in the order expected by compiled functions
     end
 
     % ---- public methods ----
@@ -134,9 +136,9 @@ classdef Expander < handle
                 isClosed = isequal(core.CommonUtils.field(cn, 'closed', false), true);
 
                 if ~isClosed
-                    obj.EdgeGraph_.addMate(sk.node, pl.node, roll, sym);
+                    obj.EdgeGraph_.addMateBidirectional(sk.node, pl.node, roll, sym);
                 else
-                    obj.EdgeGraph_.addClosedMate(sk.node, pl.node, roll, sym);
+                    obj.EdgeGraph_.addMateUnidirectional(sk.node, pl.node, roll, sym);
                 end
 
                 obj.ConnectionInfo(end+1) = struct( ...
@@ -233,6 +235,123 @@ classdef Expander < handle
                 end
                 posesNum(nodeName) = T_num;
             end
+        end
+
+        %% evaluateNumericDirect  Substitute joint values from a map and return numeric Poses.
+        %   posesNum = obj.evaluateNumericDirect(JOINTVALUEMAP)
+        %   posesNum = obj.evaluateNumericDirect(JOINTVALUEMAP, FRAMENAMES)
+        %     JOINTVALUEMAP : containers.Map — canonical name → numeric value
+        %     FRAMENAMES    : cell array — subset of frame names to evaluate
+        %                     (default: all frames in Poses map)
+        %     posesNum      : containers.Map — frame name → 4×4 double transform.
+        function posesNum = evaluateNumericDirect(obj, jointValueMap, frameNames)
+            arguments
+                obj
+                jointValueMap containers.Map = containers.Map('KeyType','char','ValueType','double')
+                frameNames     cell          = {}
+            end
+
+            % -- extract all symbolic joint variables --
+            jvKeys = keys(obj.JointVarMap);
+            valsCell = values(obj.JointVarMap);
+            subsVars = [valsCell{:}];
+            subsVals = zeros(1, numel(jvKeys));
+
+            % overlay values from the input map
+            mapKeys = keys(jointValueMap);
+            for k = 1:numel(mapKeys)
+                canonicalName = mapKeys{k};
+                if isKey(obj.JointVarMap, canonicalName)
+                    idx = find(subsVars == obj.JointVarMap(canonicalName), 1);
+                    if ~isempty(idx)
+                        subsVals(idx) = jointValueMap(canonicalName);
+                    end
+                end
+            end
+
+            % store numeric joint values for downstream consumers (e.g. viz labels)
+            obj.JointValues = containers.Map('KeyType', 'char', 'ValueType', 'double');
+            for k = 1:numel(jvKeys)
+                obj.JointValues(jvKeys{k}) = subsVals(k);
+            end
+
+            % substitute into entries of the symbolic Poses map
+            posesNum = containers.Map('KeyType', 'char', 'ValueType', 'any');
+            if isempty(frameNames)
+                ks = keys(obj.Poses);
+            else
+                ks = frameNames;
+            end
+
+            % use pre-compiled function handles when available (animation fast path)
+            if ~isempty(obj.PoseFuncs_) && obj.PoseFuncs_.Count > 0
+                for k = 1:numel(ks)
+                    nodeName = ks{k};
+                    if isKey(obj.PoseFuncs_, nodeName)
+                        fh = obj.PoseFuncs_(nodeName);
+                        T_num = fh(subsVals);
+                    else
+                        T_sym = obj.Poses(nodeName);
+                        if isa(T_sym, 'sym')
+                            T_num = double(subs(T_sym, subsVars, subsVals));
+                        else
+                            T_num = T_sym;  % constant pose, no subs needed
+                        end
+                    end
+                    posesNum(nodeName) = T_num;
+                end
+            else
+                % fallback: subs-based evaluation
+                for k = 1:numel(ks)
+                    nodeName = ks{k};
+                    T_sym = obj.Poses(nodeName);
+                    if isempty(subsVars)
+                        T_num = double(T_sym);
+                    else
+                        T_num = double(subs(T_sym, subsVars, subsVals));
+                    end
+                    posesNum(nodeName) = T_num;
+                end
+            end
+        end
+
+        %% compilePoseFunctions  Pre-compile symbolic poses to numeric function handles.
+        %   obj.compilePoseFunctions() converts every entry in the symbolic
+        %   Poses map to a matlabFunction handle.  This is a one-time cost
+        %   (~seconds) that accelerates subsequent evaluateNumericDirect calls
+        %   by 100-1000× (sub-millisecond per frame).
+        %
+        %   Must be called after the symbolic pipeline is built (i.e. after
+        %   the Expander constructor completes).
+        function compilePoseFunctions(obj)
+            jvKeys = keys(obj.JointVarMap);
+            if isempty(jvKeys)
+                % no joint variables — nothing to compile; subs on constants is fast
+                obj.PoseFuncs_ = containers.Map('KeyType','char','ValueType','any');
+                obj.PoseFuncVars_ = sym([]);
+                return;
+            end
+
+            % build ordered sym array for matlabFunction input
+            valsCell = values(obj.JointVarMap);
+            obj.PoseFuncVars_ = [valsCell{:}];
+
+            obj.PoseFuncs_ = containers.Map('KeyType', 'char', 'ValueType', 'any');
+            ks = keys(obj.Poses);
+            nTotal = numel(ks);
+            fprintf('  Compiling %d pose functions ... ', nTotal);
+            tStart = tic;
+            for k = 1:numel(ks)
+                nodeName = ks{k};
+                T_sym = obj.Poses(nodeName);
+                if isa(T_sym, 'sym')
+                    fh = matlabFunction(T_sym, 'Vars', {obj.PoseFuncVars_});
+                    obj.PoseFuncs_(nodeName) = fh;
+                end
+                % constant poses (double) are evaluated instantly — no handle needed
+            end
+            elapsed = toc(tStart);
+            fprintf('done (%.1fs, %d functions)\n', elapsed, obj.PoseFuncs_.Count);
         end
 
     end

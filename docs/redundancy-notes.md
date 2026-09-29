@@ -38,7 +38,7 @@
 
 **重叠本质**：同一标准 mate 变换公式 $T = R_z(\theta) \cdot R_x(\pi), t=0$ 在两份文档中各自独立定义。极性门控规则（仅 `socket↔plug`）在两份文档中均有完整描述。`port-attachment.md` §1 已声明与 `connection-semantics.md` 的互补关系，但并未真正引用后者的公式定义——而是各自复制了一份。
 
-**精简策略**：`port-attachment.md` 应**只写「IR 中如何表示」**：边类型区分（addMate/addClosedMate）、toStruct 过滤、诊断用途。公式和极性规则直接引用 `connection-semantics.md` 对应节号，不再重复展开。优先级：**中**。
+**精简策略**：`port-attachment.md` 应**只写「IR 中如何表示」**：边类型区分（addMateBidirectional/addMateUnidirectional）、exportEdges 过滤、诊断用途。公式和极性规则直接引用 `connection-semantics.md` 对应节号，不再重复展开。优先级：**中**。
 
 ---
 
@@ -46,7 +46,7 @@
 
 **重叠本质**：`ARCHITECTURE.md` 的「运动学核心概念 —— DSL 可视化运作原理」节（约 150 行）展开讲解了 mate 变换公式、生成树/弦边策略、`kind` 过滤机制、FK 传播算法细节、mate gap/Zdot 诊断。这些内容在 `edge-types.md`（边类型）、`port-attachment.md`（mate 边表示）、`dsl-to-ir-mapping.md`（映射管线）中也有详细展开，且 IR spec 是权威来源。
 
-**精简策略**：`ARCHITECTURE.md` 的该节应精简为「概念概述 + 指路到 IR spec」——每个概念给 2-3 句概述后直接链接到对应的 IR 文档节号。删除已在 IR spec 中详细展开的公式、代码片段、诊断公式。保留 `ARCHITECTURE.md` 独有的内容：设计决策（为什么 toStruct 剥离元数据、为什么 PosePropagator 保持独立、为什么 KinematicModel 是薄封装）。优先级：**高**。
+**精简策略**：`ARCHITECTURE.md` 的该节应精简为「概念概述 + 指路到 IR spec」——每个概念给 2-3 句概述后直接链接到对应的 IR 文档节号。删除已在 IR spec 中详细展开的公式、代码片段、诊断公式。保留 `ARCHITECTURE.md` 独有的内容：设计决策（为什么 exportEdges 剥离元数据、为什么 PosePropagator 保持独立、为什么 KinematicModel 是薄封装）。优先级：**高**。
 
 ---
 
@@ -146,7 +146,7 @@
 
 | 位置 | 问题 | 策略 |
 |------|------|------|
-| §2「标准 mate 变换（IR 实现）」 | 公式 + 代码片段 + 矩阵形式 + 分量分解，四遍讲同一件事 | 公式引用 `connection-semantics.md`，只保留「IR 实现差异」：addMate 双向 vs addClosedMate 单向 |
+| §2「标准 mate 变换（IR 实现）」 | 公式 + 代码片段 + 矩阵形式 + 分量分解，四遍讲同一件事 | 公式引用 `connection-semantics.md`，只保留「IR 实现差异」：addMateBidirectional 双向 vs addMateUnidirectional 单向 |
 | §7「诊断：mate gap 与 Zdot」 | 代码片段 + 公式 + 解读 | 保留公式和理想值表；删除代码片段（已在 ARCHITECTURE.md 中） |
 
 ### L7 · `scripts/matlab/ARCHITECTURE.md`
@@ -155,7 +155,7 @@
 |------|------|------|
 | 「运动学核心概念」节（约 150 行） | 见跨文档 #5。此外内部还有 3 个 Mermaid 图（总览、Expander 内部管线、数值化流程） | 保留 1 个总览图；管线细节图移入 `dsl-to-ir-mapping.md`（权威出处） |
 | 「关键设计决策」§3 Mate 约定 | mate 公式 + 解释，已在 `connection-semantics.md` 中定义 | 删除公式，只保留「为什么这样设计」的决策理由 |
-| 「关键设计决策」§4 多根支持 | 3 行说明，信息量低 | 与 §5 合并 |
+| 「关键设计决策」§4 多根支持 | 3 行说明，信息量低 | 已移除：EdgeGraph 改为单根语义，该节直接删除 |
 | 「关键设计决策」§5「为什么 Expander 独立于 +viz」 | 对比表 + 4 段 prose，讲同一件事 | 保留对比表，删除 prose |
 
 ### L8 · 参考文档

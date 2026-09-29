@@ -316,9 +316,9 @@ sym = core.CommonUtils.field(sk, 'symmetry', 4);
 isClosed = isequal(core.CommonUtils.field(cn, 'closed', false), true);
 
 if ~isClosed
-    obj.EdgeGraph_.addMate(sk.node, pl.node, roll, sym);
+    obj.EdgeGraph_.addMateBidirectional(sk.node, pl.node, roll, sym);
 else
-    obj.EdgeGraph_.addClosedMate(sk.node, pl.node, roll, sym);
+    obj.EdgeGraph_.addMateUnidirectional(sk.node, pl.node, roll, sym);
 end
 ```
 
@@ -326,7 +326,7 @@ end
 |------|------|------|
 | `roll` | `0` | 离散滚转索引 |
 | `symmetry` | `4`（来自 socket frame） | 旋转对称阶 |
-| `closed` | `false` | `false` → `addMate`（生成树边）；`true` → `addClosedMate`（弦边） |
+| `closed` | `false` | `false` → `addMateBidirectional`（生成树边）；`true` → `addMateUnidirectional`（弦边） |
 
 ---
 
@@ -353,8 +353,8 @@ obj.Poses = obj.EdgeGraph_.propagate();
 ```
 
 委托 `EdgeGraph.propagate()`：
-1. 以 RootNodes 为种子（$T = I_4$）
-2. 调用 `toStruct()` 过滤边（排除 `closed_mate`，剥离 `kind`）
+1. 以 RootNode 为种子（$T = I_4$）
+2. 调用 `exportEdges()` 过滤边（排除 `closed_mate`，剥离 `kind`）
 3. 委托 `PosePropagator.propagatePoses` 执行迭代 FK
 
 输出：`containers.Map`，key = frame 实例限定名，value = 4×4 全局位姿。

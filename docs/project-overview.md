@@ -107,7 +107,7 @@
   - 先确定工具模块（如 `ToolPipette`）的参考坐标系 → 沿连接链逐步定位相邻模块 → 最终抵达 `Manipulator` 外部驱动端
   - FK 传播的 root node 由 `semantic_tag: root` 标记（如 `ToolPipette.tip_origin`），该 frame 在展开时自动调用 `addRoot()` 注册
   - `semantic_tag: ground`（如 `Manipulator.ground`）是**不同的标签**，用于标识 L3 世界绑定端点，**不**触发自动 root 注册——两个标签语义分离：`root` 管 FK 传播起点，`ground` 管 L3 接地端点识别
-  - 若所有模块均无 `semantic_tag: root` 的 frame，则 fallback 到第一个 DSL 实例的第一个 body 作为 root；支持多 root（多次调用 `addRoot()`），适用于多分支 / 并联机构
+  - 若所有模块均无 `semantic_tag: root` 的 frame，则 fallback 到第一个 DSL 实例的第一个 body 作为 root；EdgeGraph 为**单 root** 语义——重复注册不同 root 节点会报错
 
   此范式将机构视为从效应器（end-effector）倒推回驱动源的有向图，而非从基座正向生长的串联链——更贴合工具优先的模块化设计思维。
 - **L3 执行层（Execution）**：把机构本体接入世界系与驱动源，闭合成自洽、可求解的系统。它定义「机构如何被固定、如何被驱动、闭环判据是什么」。
@@ -304,8 +304,8 @@ DSL 定位为 L2 纯拓扑——只描述机构本体由哪些模块实例组成
 | 实例展开 + 名前缀 | `+viz/mechanism.m` → `localExpandInstance` | 复制模块模板，展开 bodies/frames/fixed_transforms/joints，加 `instanceName.` 前缀 |
 | 参数绑定 | `+core/CommonUtils.m` → `evalScalar`/`evalVec` | 符号表达式求值：`cubeLength/2` → 数值 |
 | 参数注入 | `+viz/mechanism.m` L60-70 | `dimensions.yaml`（按 module_type）+ per-example `joint_config.yaml`（按实例名覆盖） |
-| 端口连接 → mate 边 | `+viz/mechanism.m` L105-137 | 极性校验 + `Rx(π)·Rz(roll)` mate 变换 + `addMate`/`addClosedMate` |
-| IR 图累积器 | `+ir/EdgeGraph.m` | handle class：body/frame/joint 节点，fixed/joint/mate/closed_mate 边，root nodes，传播 |
+| 端口连接 → mate 边 | `+viz/mechanism.m` L105-137 | 极性校验 + `Rx(π)·Rz(roll)` mate 变换 + `addMateBidirectional`/`addMateUnidirectional` |
+| IR 图累积器 | `+ir/EdgeGraph.m` | handle class：body/frame/joint 节点，fixed/joint/mate/closed_mate 边，root node，传播 |
 | FK 传播引擎 | `+core/PosePropagator.m` | `propagatePoses`：迭代 FK，当前为**数值**计算 |
 | 旋转表示求值 | `+core/RigidBodyMath.m` → `rot` | 支持 align / rpy / axis_angle 三种表示 |
 | Root node 自动注册 | `ir.Expander` → `localExpandInstance` | 检测 `semantic_tag: ground` → 自动 `g.addRoot()` |
@@ -353,11 +353,11 @@ flowchart LR
 | 文件 | 内容 | 代码参考 |
 |------|------|------|
 | `specs/ir/node-types.md` | body（name/geometry）、frame（host/exposed/polarity/semantic_tag/symmetry）、joint（kind/axis/variable/observable） | `EdgeGraph.Edges` struct 字段 + `localExpandInstance` 组装的 bList/fList/jList |
-| `specs/ir/edge-types.md` | kind 枚举（`fixed`/`joint`/`mate`/`closed_mate`）、双向边插入规则、`toStruct()` 过滤规则 | `EdgeGraph.addFixedTransform`/`addJoint`/`addMate`/`addClosedMate`/`toStruct` |
-| `specs/ir/dsl-to-ir-mapping.md` | 实例展开规则、连接翻译规则、参数代入规则、`semantic_tag: ground` → `RootNodes` 映射 | `localExpandInstance` 全函数 |
-| `specs/ir/port-attachment.md` | mate 变换在 IR 中的边类型区分：`addMate`（双向，参与传播）/ `addClosedMate`（单向，诊断专用） | `EdgeGraph.addMate`/`addClosedMate` |
+| `specs/ir/edge-types.md` | kind 枚举（`fixed`/`joint`/`mate`/`closed_mate`）、双向边插入规则、`exportEdges()` 过滤规则 | `EdgeGraph.addFixedTransform`/`addJoint`/`addMateBidirectional`/`addMateUnidirectional`/`exportEdges` |
+| `specs/ir/dsl-to-ir-mapping.md` | 实例展开规则、连接翻译规则、参数代入规则、`semantic_tag: root` → `RootNode` 注册映射 | `localExpandInstance` 全函数 |
+| `specs/ir/port-attachment.md` | mate 变换在 IR 中的边类型区分：`addMateBidirectional`（双向，参与传播）/ `addMateUnidirectional`（单向，诊断专用） | `EdgeGraph.addMateBidirectional`/`addMateUnidirectional` |
 | `specs/ir/symbol-registry.md` | `observable` flag → 变量收集规则、实例限定名格式、类型分类（geometric/joint/task） | A.3.3 中实现 `symbolRegistry` 后以代码为准编写 |
-| `specs/schema/ir-graph.schema.yaml` | 基于 EdgeGraph 展开后的 struct 结构编写 JSON Schema | `toStruct()` 输出格式 |
+| `specs/schema/ir-graph.schema.yaml` | 基于 EdgeGraph 展开后的 struct 结构编写 JSON Schema | `exportEdges()` 输出格式 |
 
 过关标准：任一 IR 规范文件中的字段/规则都能在 `EdgeGraph.m` 或 `Expander.m` 中找到对应代码行。
 
@@ -458,7 +458,7 @@ flowchart LR
 
 | 能力 | 位置 | 说明 |
 |------|------|------|
-| 闭环边标记 | `Expander.m` | `closed: true` → `addClosedMate()`，`toStruct()` 自动排除于 FK 传播 |
+| 闭环边标记 | `Expander.m` | `closed: true` → `addMateUnidirectional()`，`exportEdges()` 自动排除于 FK 传播 |
 | 切口自动推导 | `ExecutionConfig.m` | 从 `closed_mate` 边自动推导 `closure_cuts`（L2），也支持显式声明（L3） |
 | 执行配置全套字段 | `ExecutionConfig.m` | `mode: closed_loop`、`closure_cuts`、`world_binding`、`constrained_components`、`tolerances` 全部支持 |
 | 6-DOF 残差分解 | `+solver/KinematicModel.m` → `localPoseError()` | $[t_x, t_y, t_z, r_x, r_y, r_z]$，Z-Y-X 欧拉角 |

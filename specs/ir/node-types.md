@@ -1,7 +1,7 @@
 # IR 节点类型规范（阶段 A.3.1）
 
 > 本文档定义 IR（中间表示）图中的节点类型：`body`、`frame`、`joint` 记录以及 `root` 节点。
-> 权威代码来源：`scripts/matlab/+ir/Expander.m`（`localExpandInstance`）和 `+ir/EdgeGraph.m`（`RootNodes`）。
+> 权威代码来源：`scripts/matlab/+ir/Expander.m`（`localExpandInstance`）和 `+ir/EdgeGraph.m`（`RootNode`）。
 > 元件级定义见 `../modeling-conventions.md` §3；机器可读枚举见 `../conventions.yaml`。
 >
 > **状态**：A.3.1 v0。以已验证的 MATLAB 代码为准反推，非从零设计。
@@ -15,7 +15,7 @@ IR 图中的**节点**分为两类：
 | 类别 | 存储位置 | 说明 |
 |------|------|------|
 | 显式节点 | `Expander.Instances(i).bodies` / `.frames` / `.joints` | 每个模块实例展开后产出的 body、frame、joint 记录 |
-| 隐式节点 | `EdgeGraph.RootNodes` | FK 传播的根节点（seed pose = I₄）列表 |
+| 隐式节点 | `EdgeGraph.RootNode` | FK 传播的根节点（seed pose = I₄） |
 
 所有节点名均为**实例限定名**（instance-qualified name），格式为 `instanceName.elementName`（如 `frame0.body`、`joint1.linkA`），由 `localExpandInstance` 在展开时通过名前缀 `pre = [iname '.']` 生成。
 
@@ -139,14 +139,14 @@ jList{k} = struct('node', [pre j.from_frame], ...
 
 ### 5.1 存储
 
-Root 节点存储在 `EdgeGraph.RootNodes` cell array 中：
+Root 节点存储在 `EdgeGraph.RootNode` 字符串属性中（单根）：
 
 ```matlab
 % EdgeGraph.m L37
-RootNodes (:,1) cell = {}
+RootNode (1,:) char = ''
 ```
 
-每个元素为 frame 实例限定名（char）。
+值为 frame 实例限定名（char）；未注册时为空字符串。注册第二个**不同**节点时 `addRoot` 报错 `ir:EdgeGraph:multipleRoots`。
 
 ### 5.2 注册方式
 
@@ -166,14 +166,13 @@ end
 
 ### 5.4 FK 传播行为
 
-Root node 在 `EdgeGraph.propagate()` 中以 $T = I_4$ 为种子位姿。支持多 root node（多分支/并联机构）。
+Root node 在 `EdgeGraph.propagate()` 中以 $T = I_4$ 为种子位姿。EdgeGraph 采用**单 root** 语义（多分支/并联机构的多根传播不再支持；`PosePropagator` 引擎层面的多 seed 能力仍保留）。
 
 ```matlab
 % EdgeGraph.m L121-123
-if ~isempty(obj.RootNodes)
-    for k = 1:numel(obj.RootNodes)
-        seed(obj.RootNodes{k}) = eye(4);
-    end
+if ~isempty(obj.RootNode)
+    seed(obj.RootNode) = eye(4);
+end
 ```
 
 > **工具端生长范式（Tool-Rooted Growth）**：root node 通常是工具模块（如 `ToolPipette`）的参考 frame，机构从工具端开始沿连接链向外生长，最终抵达 `Manipulator` 驱动端。详见 §3.4。
@@ -221,9 +220,9 @@ portName = ref(d(1)+1:end);
 | Body struct 字段 | `Expander.m` L196-201 (`bList{k} = struct(...)`) |
 | Frame struct 字段 | `Expander.m` L204-217 (`fList{k} = struct(...)`) |
 | Joint struct 字段 | `Expander.m` L236-245 (`jList{k} = struct(...)`) |
-| Root 自动注册 | `Expander.m` L299-301 (`semantic_tag == 'ground'`) |
+| Root 自动注册 | `Expander.m` L299-301 (`semantic_tag == 'root'`) |
 | Root fallback | `Expander.m` L166-168 (`hasRootNodes()`) |
-| RootNodes 存储 | `EdgeGraph.m` L37 (`RootNodes (:,1) cell`) |
+| RootNode 存储 | `EdgeGraph.m` L37 (`RootNode (1,:) char`) |
 | FK 种子位姿 | `EdgeGraph.m` L121-123 (`seed(...) = eye(4)`) |
 | 名前缀生成 | `Expander.m` L192 (`pre = [iname '.']`) |
 | 端口引用解析 | `Expander.m` L254-259 (`localParsePort`) |
